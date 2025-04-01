@@ -21,13 +21,14 @@
 typedef struct {
   uint8_t sequence_number;
   uint32_t time;
-  int32_t latitude;
-  int32_t longitude;
+  // int32_t latitude;
+  // int32_t longitude;
   int16_t temperature;
   int16_t pressure;
   int16_t pressure_ain;
   int16_t pulse_rate;
 } __attribute__((packed)) Message;
+
 _Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max message size");
 
 // Arrays to store sensor readings
