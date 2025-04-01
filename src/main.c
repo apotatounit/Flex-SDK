@@ -3,6 +3,8 @@
 #include "flex.h"
 #include <time.h>
 
+#include "modbussensor.h"
+
 #define APPLICATION_NAME "Sensor Data Logger"
 
 // Sensor configuration
@@ -16,6 +18,18 @@
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT (DATA_COLLECTION_DURATION_SEC * 1000 / DATA_COLLECTION_INTERVAL_MS)
 
+typedef struct {
+  uint8_t sequence_number;
+  uint32_t time;
+  int32_t latitude;
+  int32_t longitude;
+  int16_t temperature;
+  int16_t pressure;
+  int16_t pressure_ain;
+  int16_t pulse_rate;
+} __attribute__((packed)) Message;
+_Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max message size");
+
 // Arrays to store sensor readings
 static float temperature_readings[SENSOR_READINGS_COUNT];
 static float pressure_readings[SENSOR_READINGS_COUNT];
@@ -24,7 +38,12 @@ static float pressure_readings[SENSOR_READINGS_COUNT];
 // Simulated functions for temperature, pressure, and flow meter
 static float ReadTemperatureSensor(void) {
   // Replace with actual temperature sensor reading logic
-  return 25.0 + (rand() % 100) / 100.0; // Example: 25.0°C ± random noise
+  float temperature = UINT32_MAX / 10.0; // Simulated temperature reading
+  int result = Modbus_Request_Receive_Temperature(&temperature);
+  if (result) {
+    printf("Failed to Read Temperature from Modbus sensor.\r\n");
+  }
+  return temperature;
 }
 
 static float ReadPressureSensor(void) {
@@ -100,9 +119,6 @@ static void CollectSensorData(void) {
   printf("Average Temperature: %.2f°C\r\n", avg_temperature);
   printf("Average Pressure: %.2fV\r\n", avg_pressure);
   printf("Flow Rate: %.2f pulses/sec\r\n", flow_rate);
-
-  // Disable power supply to sensors
-  FLEX_PowerOutDeinit();
 }
 
 static int InitSensors(void) {
@@ -113,6 +129,10 @@ static int InitSensors(void) {
   }
   if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0) {
     printf("Failed to Init Analog Input.\r\n");
+    return -1;
+  }
+  if (Modbus_Init() != 0) {
+    printf("Failed to Init Modbus.\r\n");
     return -1;
   }
 
@@ -135,6 +155,7 @@ static void DeinitSensors(void) {
   // Deinit sensors
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
+  Modbus_Deinit();
 }
 
 static time_t ScheduleNextRun(void) {
@@ -151,6 +172,38 @@ static time_t ScheduleNextRun(void) {
   // Schedule next run in 1 hour
   return FLEX_TimeGet() + 3600; // Schedule next run in 1 hour
 }
+
+// static time_t send_message(void) {
+//   static uint8_t sequence_number = 0;
+
+//   Message message = {0};
+//   message.sequence_number = sequence_number++;
+//   message.time = FLEX_TimeGet();
+
+//   int32_t latitude = 0;
+//   int32_t longitude = 0;
+//   FLEX_LastLocationAndLastFixTime(&latitude, &longitude, NULL);
+//   message.latitude = latitude;
+//   message.longitude = longitude;
+
+//   int16_t temperature = 0;
+//   int16_t humidity = 0;
+//   read_temperature_and_humidity(&temperature, &humidity);
+//   message.temperature = temperature;
+//   message.humidity = humidity;
+
+//   // Schedule messages for satellite transmission
+//   FLEX_MessageSchedule((const uint8_t *const)&message, sizeof(message));
+//   printf("Scheduled message: \n");
+//   printf("  sequence_number: %u\n", message.sequence_number);
+//   printf("  time: %lu\n", message.time);
+//   printf("  latitude: %ld\n", message.latitude);
+//   printf("  longitude: %ld\n", message.longitude);
+//   printf("  temperature: %d\n", message.temperature);
+//   printf("  humidity: %d\n", message.humidity);
+
+//   return (FLEX_TimeGet() + 24 * 3600 / MESSAGES_PER_DAY);
+// }
 
 void FLEX_AppInit() {
   printf("%s\r\n", APPLICATION_NAME);
