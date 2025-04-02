@@ -45,7 +45,8 @@ if meson.is_subproject()
 else
   # Add your projects source file to this array
   c_files = [
-    'src/main.c'
+    'src/main.c',
+    'src/modbussensor.c'
   ]
 
   # Create the user_application as an ELF
