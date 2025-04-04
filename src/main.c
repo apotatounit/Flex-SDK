@@ -137,9 +137,9 @@ static void CollectSensorData(void)
   float flow_rate = (float)total_pulses / (elapsed_time_ms / 1000.0); // Calculate flow rate in pulses/sec
 
   // Print results
-  printf("Average Temperature: %.1f °C\r\n", avg_temperature);
+  printf("Average Temperature: %.2f °C\r\n", avg_temperature);
   printf("Average Pressure AIN: %.3f V\r\n", avg_pressure_ain);
-  printf("Average Pressure AIN: %.3f bar\r\n", avg_pressure);
+  printf("Average Pressure: %.3f bar\r\n", avg_pressure);
   printf("Flow Rate: %.2f pulses/sec\r\n", flow_rate);
 }
 

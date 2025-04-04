@@ -53,7 +53,7 @@ static ssize_t serial_write(void *const ctx, const uint8_t *const buffer, const 
   return count;
 }
 
-inline uint16_t merge_i16(const uint8_t hi, const uint8_t low)
+inline int16_t merge_i16(const uint8_t hi, const uint8_t low)
 {
   return (int16_t)((uint16_t)hi << 8 | (uint16_t)low);
 }
@@ -91,12 +91,16 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
       printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
     }
 
-    uint16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
+    int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
     *temperature = (float)temp_raw / 10.0f;
     break;
   }
 
   return result;
+}
+
+int16_t custom_merge_u16(const uint8_t hi, const uint8_t low)
+{
 }
 
 int Modbus_Init()
