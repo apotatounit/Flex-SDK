@@ -17,7 +17,7 @@
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT (DATA_COLLECTION_DURATION_SEC * 1000 / DATA_COLLECTION_INTERVAL_MS)
 
-#define ENABLE_TRANSMIT 0
+#define ENABLE_TRANSMIT 1
 
 typedef struct
 {
@@ -159,9 +159,9 @@ static SensorMeasurements CollectSensorData(void)
 
   // Map avg_pressure_ain from 0.5-4.5 volts to 0-5 bar
   float avg_pressure;
-  if (avg_pressure_ain < 0.5 || avg_pressure_ain > 4.5)
+  if (avg_pressure_ain < 0.3 || avg_pressure_ain > 4.5)
   {
-    printf("Error: Pressure reading out of range (%.2fV)\r\n", avg_pressure_ain);
+    printf("reading out of range (%.2fV)\r\n", avg_pressure_ain);
     avg_pressure = -1; // Indicate an error
   }
   else
@@ -172,6 +172,7 @@ static SensorMeasurements CollectSensorData(void)
 
   // Stop flow meter pulse counting
   FlowMeterData flow_data = StopFlowMeterPulseCounting();
+  flow_data.pulse_count -= 1; // Adjust for the initial pulse
 
   // Calculate flow rate (pulses per minute)
   uint32_t pulses_per_minute = (flow_data.pulse_count * 60000) / flow_data.elapsed_time_ms;
@@ -288,14 +289,15 @@ static time_t ScheduleNextRun(void)
   }
   else
   {
+    printf("Sensors initialised\r\n");
     SensorMeasurements measurements = CollectSensorData();
-    if (ENABLE_TRANSMIT && FLEX_TimeGet() >= next_run_time)
+    printf("Sensor data collected\r\n");
+    if (ENABLE_TRANSMIT)
     {
-      // Schedule the next run
-      printf("Scheduling next run...\r\n");
-
+      printf("Making message...\r\n");
       Message message = MakeMessage(measurements);
       send_message(message);
+      printf("Message sent\r\n");
       next_run_time = wakeup_time + NEXT_RUN_INTERVAL_SEC;
       printf("Next run time: %lu\n", (uint32_t)next_run_time);
     }
