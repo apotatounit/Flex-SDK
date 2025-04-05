@@ -99,10 +99,6 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
   return result;
 }
 
-int16_t custom_merge_u16(const uint8_t hi, const uint8_t low)
-{
-}
-
 int Modbus_Init()
 {
   // Initialize Modbus device
