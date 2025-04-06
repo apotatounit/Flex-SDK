@@ -13,11 +13,12 @@
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 1000
 #define SENSOR_STABILISE_DELAY_MS 100
-#define DATA_COLLECTION_DURATION_SEC 10
+// #define DATA_COLLECTION_DURATION_SEC 10
 #define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT (DATA_COLLECTION_DURATION_SEC * 1000 / DATA_COLLECTION_INTERVAL_MS)
+#define SENSOR_READINGS_COUNT 10
 
-#define ENABLE_TRANSMIT 1
+#define ENABLE_TRANSMIT 0
+#define ENABLE_MODBUS 1
 
 typedef struct
 {
@@ -52,6 +53,7 @@ _Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max m
 
 static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
+static void BlinkLed(int count, bool inverse);
 
 // Arrays to store sensor readings
 // static float temperature_readings[SENSOR_READINGS_COUNT];
@@ -63,7 +65,18 @@ static ReadResult ReadTemperatureSensor(void)
 {
   // Replace with actual temperature sensor reading logic
   float temperature = UINT32_MAX / 10.0; // Simulated temperature reading
-  int result = Modbus_Request_Receive_Temperature(&temperature);
+  int result = 0;
+  if (ENABLE_MODBUS)
+  {
+    result = Modbus_Request_Receive_Temperature(&temperature);
+  }
+  else
+  {
+    // Simulate a successful read
+    temperature = 25.0; // Simulated temperature reading
+    result = 0;
+  }
+  // Modbus_Request_Receive_Temperature(&temperature);
   if (result)
   {
     printf("Failed to Read Temperature from Modbus sensor.\r\n");
@@ -139,7 +152,9 @@ static SensorMeasurements CollectSensorData(void)
     {
       printf("Error reading sensors. Skipping this iteration.\r\n");
       continue; // Skip this iteration if there's an error
+      BlinkLed(2, true);
     }
+    BlinkLed(1, true);
 
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
@@ -193,7 +208,7 @@ static SensorMeasurements CollectSensorData(void)
 
 static int InitDevice(void)
 {
-  if (Modbus_Init() != 0)
+  if (ENABLE_MODBUS && Modbus_Init() != 0)
   {
     printf("Failed to Init Modbus.\r\n");
     return -1;
@@ -272,6 +287,37 @@ static void DeinitSensors(void)
 // Green LED OFF time
 #define LED_OFF_TIME_SEC 1
 
+// function to blink LED n times, defined by argument
+static void BlinkLed(int count, bool inverse)
+{ 
+  uint delay = 500; // 500ms
+  for (int i = 0; i < count; i++)
+  {
+    if (inverse)
+    {
+      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+      printf("Green LED Off\n");
+    }
+    else
+    {
+      FLEX_LEDGreenStateSet(FLEX_LED_ON);
+      printf("Green LED On\n");
+    }
+    FLEX_DelayMs(delay);
+    if (inverse)
+    {
+      FLEX_LEDGreenStateSet(FLEX_LED_ON);
+      printf("Green LED On\n");
+    }
+    else
+    {
+      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+      printf("Green LED Off\n");
+    }
+    FLEX_DelayMs(delay);
+  }
+}
+
 static time_t ScheduleNextRun(void)
 {
   // Schedule next run in 1 hour since wakeup time
@@ -290,6 +336,7 @@ static time_t ScheduleNextRun(void)
   else
   {
     printf("Sensors initialised\r\n");
+    BlinkLed(1, true);
     SensorMeasurements measurements = CollectSensorData();
     printf("Sensor data collected\r\n");
     if (ENABLE_TRANSMIT)
@@ -356,6 +403,7 @@ static int send_message(Message message)
 void FLEX_AppInit()
 {
   printf("%s\r\n", APPLICATION_NAME);
+  printf("Compiled on %s at %s\n", __DATE__, __TIME__);
   InitDevice();
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
 }
