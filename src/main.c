@@ -11,14 +11,16 @@
 #define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
 #define PULSE_WAKEUP_COUNT 0
 
-#define SENSOR_FLOW_METER_STABILISE_DELAY_MS 1000
+#define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
 #define SENSOR_STABILISE_DELAY_MS 100
 // #define DATA_COLLECTION_DURATION_SEC 10
 #define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT 10
+#define SENSOR_READINGS_COUNT 5
 
 #define ENABLE_TRANSMIT 1
-#define ENABLE_MODBUS 0
+#define ENABLE_MODBUS 1
+bool bInitModbusRequired = true; // only required on first init after power supply init
+#define LED_BLINK_DELAY 200 // ms
 
 typedef struct
 {
@@ -144,6 +146,7 @@ static SensorMeasurements CollectSensorData(void)
   // Collect temperature and pressure readings
   for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
   {
+    printf("Collecting sensor data...\r\n");
     uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
     ReadResult temperature_result = ReadTemperatureSensor();
     ReadResult pressure_result = ReadPressureSensor();
@@ -154,19 +157,24 @@ static SensorMeasurements CollectSensorData(void)
       continue; // Skip this iteration if there's an error
       BlinkLed(2, true);
     }
-    BlinkLed(1, true);
 
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
 
     printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %u\r\n", temperature, pressure, (uint16_t)(pulse_count - prev_pulse_count));
 
+
     temperature_sum += temperature;
     pressure_sum += pressure;
     sum_counter++; // doesn't increment in case of read error
 
     prev_pulse_count = pulse_count;
-    FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS);
+
+    BlinkLed(1, true);
+    if (DATA_COLLECTION_INTERVAL_MS > 2 * LED_BLINK_DELAY)
+    {
+      FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS - 2*LED_BLINK_DELAY);
+    }
   }
 
   float avg_temperature = temperature_sum / sum_counter;
@@ -208,11 +216,11 @@ static SensorMeasurements CollectSensorData(void)
 
 static int InitDevice(void)
 {
-  if (ENABLE_MODBUS && Modbus_Init() != 0)
-  {
-    printf("Failed to Init Modbus.\r\n");
-    return -1;
-  }
+  // if (ENABLE_MODBUS && Modbus_Init() != 0)
+  // {
+  //   printf("Failed to Init Modbus.\r\n");
+  //   return -1;
+  // }
   return 0;
 }
 
@@ -240,11 +248,16 @@ static int InitSensors(void)
   {
     printf("Analog Input initialised.\r\n");
   }
-  // if (Modbus_Init() != 0)
-  // {
-  //   printf("Failed to Init Modbus.\r\n");
-  //   // return -1;
-  // }
+
+  if (bInitModbusRequired && Modbus_Init() != 0)
+  {
+    printf("Failed to Init Modbus.\r\n");
+    // return -1;
+  }
+  else {
+    bInitModbusRequired = false;
+    printf("Modbus initialised.\r\n");
+  }
 
   // Wait to begin counting pulses from the flow meter
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
@@ -275,46 +288,33 @@ static void DeinitSensors(void)
   // Modbus_Deinit();
 }
 
-// Blinky Interval
-#define BLINKY_INTERVAL_MIN 1
-
-// Number of LED Flashes
-#define NO_OF_FLASHES 10
-
-// Green LED ON time
-#define LED_ON_TIME_SEC 1
-
-// Green LED OFF time
-#define LED_OFF_TIME_SEC 1
-
 // function to blink LED n times, defined by argument
 static void BlinkLed(int count, bool inverse)
 { 
-  uint delay = 500; // 500ms
   for (int i = 0; i < count; i++)
   {
     if (inverse)
     {
       FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      printf("Green LED Off\n");
+      // printf("Green LED Off\n");
     }
     else
     {
       FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      printf("Green LED On\n");
+      // printf("Green LED On\n");
     }
-    FLEX_DelayMs(delay);
+    FLEX_DelayMs(LED_BLINK_DELAY);
     if (inverse)
     {
       FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      printf("Green LED On\n");
+      // printf("Green LED On\n");
     }
     else
     {
       FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      printf("Green LED Off\n");
+      // printf("Green LED Off\n");
     }
-    FLEX_DelayMs(delay);
+    FLEX_DelayMs(LED_BLINK_DELAY);
   }
 }
 
