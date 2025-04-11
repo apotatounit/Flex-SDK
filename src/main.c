@@ -17,7 +17,7 @@
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT 5
 
-#define ENABLE_TRANSMIT 1
+#define ENABLE_TRANSMIT 0
 #define ENABLE_MODBUS 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
 #define LED_BLINK_DELAY 200 // ms
@@ -343,7 +343,8 @@ static time_t ScheduleNextRun(void)
     {
       printf("Making message...\r\n");
       Message message = MakeMessage(measurements);
-      send_message(message);
+      int ret = send_message(message);
+      printf("send_message returned: %d\n", ret);
       printf("Message sent\r\n");
       next_run_time = wakeup_time + NEXT_RUN_INTERVAL_SEC;
       printf("Next run time: %lu\n", (uint32_t)next_run_time);
