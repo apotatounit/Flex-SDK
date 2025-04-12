@@ -46,7 +46,15 @@ typedef struct
   int16_t temperature;
   uint16_t analog_in;
   uint16_t pulse_per_minute;
+  uint8_t error_code;
 } __attribute__((packed)) Message;
+
+typedef enum
+{
+  SENSOR_ERROR_NONE = 0x00, // No error
+  SENSOR_ERROR_TEMP = 0x01, // Temperature sensor error
+  SENSOR_ERROR_AIN = 0x02   // Analog input sensor error
+} SensorError;
 
 typedef struct
 {
@@ -409,6 +417,15 @@ static Message MakeMessage(SensorMeasurements measurements)
   message.temperature = (int16_t)measurements.temperature;
   message.analog_in = (uint16_t)measurements.analog_in;
   message.pulse_per_minute = (uint16_t)measurements.pulse_per_minute;
+
+  if (measurements.ret_temp)
+  {
+    message.error_code |= SENSOR_ERROR_TEMP;
+  }
+  if (measurements.ret_ain)
+  {
+    message.error_code |= SENSOR_ERROR_AIN;
+  }
 
   //   int32_t latitude = 0;
   //   int32_t longitude = 0;

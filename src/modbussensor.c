@@ -90,10 +90,11 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
     {
       printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
     }
-    
-    if (retries > 0 && result == MODBUS_SUCCESS && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
+
+    // skip first empty result, for the case if sensor hasnt initialized yet
+    if (retries == 0 && result == MODBUS_SUCCESS && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
     {
-      printf("Skipping first empty result\n");
+      printf("Skipping first zero result\n");
       result = MODBUS_ERROR_IO_FAILURE;
       continue;
     }
