@@ -12,15 +12,19 @@
 #define PULSE_WAKEUP_COUNT 0
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
-#define SENSOR_STABILISE_DELAY_MS 100
+#define SENSOR_STABILISE_DELAY_MS 5000
 // #define DATA_COLLECTION_DURATION_SEC 10
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT 5
 
+#define INTERVAL_WAKEUP_DEFAULT 30       // 30 seconds
+#define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
+// #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
+
 #define ENABLE_TRANSMIT 0
 #define ENABLE_MODBUS 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
-#define LED_BLINK_DELAY 200 // ms
+#define LED_BLINK_DELAY 200      // ms
 
 typedef struct
 {
@@ -33,7 +37,6 @@ typedef struct
   uint8_t ret_flexsense;
 } SensorMeasurements;
 
-#define NEXT_RUN_INTERVAL_SEC 60 * 60
 typedef struct
 {
   uint8_t sequence_number;
@@ -55,7 +58,8 @@ _Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max m
 
 static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
-static void BlinkLed(int count, bool inverse);
+static void BlinkLed(int count);
+static uint16_t GetPulseRate(void);
 
 // Arrays to store sensor readings
 // static float temperature_readings[SENSOR_READINGS_COUNT];
@@ -66,7 +70,7 @@ static void BlinkLed(int count, bool inverse);
 static ReadResult ReadTemperatureSensor(void)
 {
   // Replace with actual temperature sensor reading logic
-  float temperature = UINT32_MAX / 10.0; // Simulated temperature reading
+  float temperature; // Simulated temperature reading
   int result = 0;
   if (ENABLE_MODBUS)
   {
@@ -108,14 +112,23 @@ static ReadResult ReadPressureSensor(void)
   return read_result;
 }
 
-static uint32_t pulse_count_start_tick;
-static uint32_t pulse_count_end_tick;
+uint32_t pulse_count_start_tick;
+uint32_t pulse_count_end_tick;
 
 static void StartFlowMeterTimer(void)
 {
+  // Initialise to generate event every N pulses
+  if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS))
+  {
+    printf("Failed to initialise pulse counter\n");
+  }
+  else
+  {
+    printf("Pulse counter initialised.\r\n");
+  }
   // Start counting pulses from the flow meter
-  printf("Starting flow meter pulse counting...\r\n");
   pulse_count_start_tick = FLEX_TickGet(); // Use FLEX SDK function to get start tick
+  printf("Pulse counting started at tick: %ld\r\n", pulse_count_start_tick);
 }
 
 typedef struct
@@ -133,56 +146,89 @@ static FlowMeterData StopFlowMeterPulseCounting(void)
   uint32_t elapsed_time_ms = pulse_count_end_tick - pulse_count_start_tick;
   printf("Elapsed Time for Pulse Counting: %u milliseconds\r\n", (uint16_t)elapsed_time_ms);
 
+  FLEX_PulseCounterDeinit(); // Deinitialise the pulse counter
+  printf("Pulse counter deinitialised.\r\n");
+
   FlowMeterData data = {flow_meter_pulse_count, elapsed_time_ms};
   return data;
 }
 
+static uint16_t GetPulseRate(void)
+{
+  // Replace with actual logic to get current pulse rate
+  uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
+  uint16_t pulse_rate = (uint16_t)(1000.0 / (FLEX_TickGet() - pulse_count_start_tick) * pulse_count); // pulses per second
+  return pulse_rate;
+}
+
 static SensorMeasurements CollectSensorData(void)
 {
-  uint32_t prev_pulse_count = (uint32_t)FLEX_PulseCounterGet();
   // Calculate averages
   float temperature_sum = 0.0, pressure_sum = 0.0;
-  int sum_counter = 0;
+  unsigned int sum_counter_pres = 0;
+  unsigned int sum_counter_temp = 0;
+  int16_t err_temp = 0;
+  int16_t err_ain = 0;
+  // int16_t err_pulse = 0;
   // Collect temperature and pressure readings
   for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
   {
     printf("Collecting sensor data...\r\n");
     uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
+    uint16_t pulse_rate = GetPulseRate();
     ReadResult temperature_result = ReadTemperatureSensor();
     ReadResult pressure_result = ReadPressureSensor();
 
-    if (temperature_result.return_code != 0 || pressure_result.return_code != 0)
+    if (temperature_result.return_code)
     {
-      printf("Error reading sensors. Skipping this iteration.\r\n");
-      continue; // Skip this iteration if there's an error
-      BlinkLed(2, true);
+      printf("Error reading temperature sensor\r\n");
+      err_temp = temperature_result.return_code;
+    }
+    else
+    {
+      sum_counter_temp++;
+      temperature_sum += temperature_result.value;
+      err_temp = 0;
+    }
+
+    if (pressure_result.return_code)
+    {
+      printf("Error reading pressure sensor\r\n");
+      err_ain = pressure_result.return_code;
+    }
+    else
+    {
+      sum_counter_pres++;
+      pressure_sum += pressure_result.value;
+      err_ain = 0;
+    }
+
+    if (pressure_result.return_code || temperature_result.return_code)
+    {
+      BlinkLed(3);
+    }
+    else
+    {
+      BlinkLed(1);
     }
 
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
 
-    printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %u\r\n", temperature, pressure, (uint16_t)(pulse_count - prev_pulse_count));
+    printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
 
-
-    temperature_sum += temperature;
-    pressure_sum += pressure;
-    sum_counter++; // doesn't increment in case of read error
-
-    prev_pulse_count = pulse_count;
-
-    BlinkLed(1, true);
     if (DATA_COLLECTION_INTERVAL_MS > 2 * LED_BLINK_DELAY)
     {
-      FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS - 2*LED_BLINK_DELAY);
+      FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS - 2 * LED_BLINK_DELAY);
     }
   }
 
-  float avg_temperature = temperature_sum / sum_counter;
-  float avg_pressure_ain = pressure_sum / sum_counter;
+  float avg_temperature = sum_counter_temp ? temperature_sum / sum_counter_temp : 0;
+  float avg_pressure_ain = sum_counter_pres ? pressure_sum / sum_counter_pres : 0;
 
   // Map avg_pressure_ain from 0.5-4.5 volts to 0-5 bar
   float avg_pressure;
-  if (avg_pressure_ain < 0.3 || avg_pressure_ain > 4.5)
+  if (avg_pressure_ain < 0.3 || avg_pressure_ain > 5)
   {
     printf("reading out of range (%.2fV)\r\n", avg_pressure_ain);
     avg_pressure = -1; // Indicate an error
@@ -195,10 +241,13 @@ static SensorMeasurements CollectSensorData(void)
 
   // Stop flow meter pulse counting
   FlowMeterData flow_data = StopFlowMeterPulseCounting();
-  flow_data.pulse_count -= 1; // Adjust for the initial pulse
+  if (flow_data.pulse_count)
+  {
+    flow_data.pulse_count -= 1; // Adjust for the initial pulse
+  }
 
   // Calculate flow rate (pulses per minute)
-  uint32_t pulses_per_minute = (flow_data.pulse_count * 60000) / flow_data.elapsed_time_ms;
+  uint32_t pulses_per_minute = (uint32_t)(flow_data.pulse_count * (60000.0 / flow_data.elapsed_time_ms));
 
   // Print results
   printf("Average Temperature: %.1f °C\r\n", avg_temperature);
@@ -210,6 +259,9 @@ static SensorMeasurements CollectSensorData(void)
   measurements.temperature = (int16_t)(avg_temperature * 10 + 0.5); // Round to nearest 0.1 and convert to tenths of degrees
   measurements.analog_in = (uint16_t)(avg_pressure_ain * 1000);     // Convert to millivolts
   measurements.pulse_per_minute = (uint16_t)pulses_per_minute;
+  measurements.ret_temp = (uint8_t)err_temp;
+  measurements.ret_ain = (uint8_t)err_ain;
+
   // TODO assign ret_temp - error code for sensor interfacing
   return measurements;
 }
@@ -249,29 +301,19 @@ static int InitSensors(void)
     printf("Analog Input initialised.\r\n");
   }
 
-  if (bInitModbusRequired && Modbus_Init() != 0)
+  if (ENABLE_MODBUS && bInitModbusRequired && Modbus_Init() != 0)
   {
     printf("Failed to Init Modbus.\r\n");
     // return -1;
   }
-  else {
+  else
+  {
     bInitModbusRequired = false;
     printf("Modbus initialised.\r\n");
   }
 
-  // Wait to begin counting pulses from the flow meter
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
 
-  // Initialise to generate event every N pulses
-  if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS))
-  {
-    printf("Failed to initialise pulse counter\n");
-    return -1;
-  }
-  else
-  {
-    printf("Pulse counter initialised.\r\n");
-  }
   StartFlowMeterTimer();
 
   // Wait for sensors to stabilize
@@ -289,8 +331,9 @@ static void DeinitSensors(void)
 }
 
 // function to blink LED n times, defined by argument
-static void BlinkLed(int count, bool inverse)
-{ 
+static void BlinkLed(int count)
+{
+  bool inverse = false;
   for (int i = 0; i < count; i++)
   {
     if (inverse)
@@ -322,21 +365,20 @@ static time_t ScheduleNextRun(void)
 {
   // Schedule next run in 1 hour since wakeup time
   time_t wakeup_time = FLEX_TimeGet();
-  time_t next_run_time = wakeup_time + 30;
+  time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_DEFAULT;
 
-  FLEX_LEDGreenStateSet(FLEX_LED_ON);
-  printf("Green LED On\n");
+  // FLEX_LEDGreenStateSet(FLEX_LED_ON);
+  // printf("Green LED On\n");
+  BlinkLed(5);
 
   // Init sensors
   if (InitSensors())
   {
-    printf("Aborting Init Sensors, retry in 10 seconds\r\n");
-    next_run_time = wakeup_time + 10; // Retry in 10 seconds
+    printf("Failed Init Sensors\n");
   }
   else
   {
     printf("Sensors initialised\r\n");
-    BlinkLed(1, true);
     SensorMeasurements measurements = CollectSensorData();
     printf("Sensor data collected\r\n");
     if (ENABLE_TRANSMIT)
@@ -344,17 +386,19 @@ static time_t ScheduleNextRun(void)
       printf("Making message...\r\n");
       Message message = MakeMessage(measurements);
       int ret = send_message(message);
-      printf("send_message returned: %d\n", ret);
-      printf("Message sent\r\n");
-      next_run_time = wakeup_time + NEXT_RUN_INTERVAL_SEC;
-      printf("Next run time: %lu\n", (uint32_t)next_run_time);
+      printf("Message sent with result: %d\r\n", ret);
+      next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
+      BlinkLed(5);
     }
   }
+  printf("Deinitialising sensors...\r\n");
   DeinitSensors();
 
-  FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+  // FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+  printf("Next run in %ld seconds\r\n", (int32_t)(next_run_time - FLEX_TimeGet()));
   return next_run_time;
 }
+
 static Message MakeMessage(SensorMeasurements measurements)
 {
   static uint8_t sequence_number = 0;
