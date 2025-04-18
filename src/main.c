@@ -465,7 +465,8 @@ static int send_message(Message message)
 void FLEX_AppInit()
 {
   printf("%s\r\n", APPLICATION_NAME);
-  printf("Compiled on %s at %s\n", __DATE__, __TIME__);
+  printf("Nilus App release_v03\r\n");
+  printf("Compiled on %s at %s\r\n", __DATE__, __TIME__);
   InitDevice();
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
 }

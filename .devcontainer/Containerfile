@@ -3,7 +3,7 @@ MAINTAINER Myriota
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
-ENV TZ 'Australia/Adelaide'
+ENV TZ 'America/Santiago'
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
 ENV DEBIAN_FRONTEND=noninteractive
