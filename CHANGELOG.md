@@ -1,5 +1,26 @@
 # Changelog
 
+## Flex SDK Release v2.4.0
+
+#### Battery and power status
+* Adds `FLEX_GetBatteryVoltage` API to return the battery voltage in mV.
+* Adds `FLEX_IsOnExternalPower` API to return if FlexSense is powered externally or via battery power.
+* Adds `FLEX_OnExternalPowerHandlerSet` API to create an event handler for when the external power state changes.
+* Adds the `battery` example that demonstrates the usage of the battery and power status APIs.
+
+#### Configuration and diagnostics
+Adds the ability to store configuration and diagnostic values.
+* Configuration values persist through resets and can be updated via Bluetooth using the FlexAssist mobile application.
+* Diagnostic values are set to persist through resets or not and can be viewed but not updated over Bluetooth using the FlexAssist mobile application.
+* Adds `FLEX_DiagConfValueWrite` API to write a configuration or diagnostic value to memory.
+* Adds `FLEX_DiagConfValueRead` API to read a configuration or diagnostic value to memory.
+* Adds `FLEX_DiagConfValueNotifyHandlerSet` to create an event handler for when a configuration or diagnostic value changes.
+* Adds the `configuration` example that demonstrates the usage of the configuration and diagnostic APIs.
+
+#### General
+* Adds the `i2c_bme280` example that demonstartes FlexSense interfacing with a BME280 sensor via I2C.
+* Updates the file extension of the compiled binaries that do not include network info to .nonetwork.bin.
+
 ## Flex SDK Release v2.3.1
 
 * Fix issue where the default serial configuration was set to nine databits.

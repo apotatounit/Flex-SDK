@@ -45,27 +45,27 @@ Install these packages with apt:
 
 ```shell
 sudo apt install \
-  git \
+ git \
   curl \
-  xxd \
+ xxd \
   meson \
-  ninja-build \
+ ninja-build \
   gcc \
-  python3 \
+ python3 \
   python3-pip \
-  python-is-python3
+ python-is-python3
 ```
 
->  [!TIP]
->  If you install these programs via other methods then make sure
->  they meet these version requirements:
+> [!TIP]
+> If you install these programs via other methods then make sure
+> they meet these version requirements:
 >  - **meson >= 0.61.2**
 >  - **ninja >= 1.10.1**
 >  - **python >= 3.10.12**
 >
->  You can ignore the gcc version as it is only installed as a
->  requirement of meson native builds, but not actually used in the cross
->  building process.
+> You can ignore the gcc version as it is only installed as a
+> requirement of meson native builds, but not used in the cross
+> building process.
 
 #### Install GNU ARM Toolchain
 
@@ -85,22 +85,22 @@ sudo ./scripts/install_arm_toolchain.sh
 
 #### Install Python Requirements
 
-Install the correct python environment with:
+Install the correct Python environment with:
 
 ```
 pip3 install -r requirements.txt
 ```
 
 > [!TIP]
-> For simplicity we install the python packages globally, but you
-> can also use a python virtual environment. See
+> For simplicity we install the Python packages globally, but you
+> can also use a Python virtual environment. See
 > [here](https://docs.python.org/3/tutorial/venv.html)
 > for details.
 
 ### Downloading libflex and system_image binaries
 
 The `libflex.a` and `system_image.bin` binaries must downloaded and installed
-in the correct location, in order to perform a build. This can be
+in the correct location, to perform a build. This can be
 achieved by running the following command:
 
 ```shell
@@ -108,14 +108,14 @@ python scripts/download_binaries.py
 ```
 
 > [!IMPORTANT]
-> You require valid Myriota Device Manager credentials in order to
+> You require valid Myriota Device Manager credentials to
 > download the binaries. The script will prompt you to supply them.
 
 ### Setting Up DevContainer on Windows
 
 To build applications using a DevContainer on Windows you should first install
 [VSCode](https://code.visualstudio.com/). When you open the Flex SDK folder in
-VSCode it should direct you through the steps that are required to setup your
+VSCode it should direct you through the steps that are required to set up your
 [DevContainer](https://code.visualstudio.com/docs/devcontainers/containers).
 Once you have the DevContainer open in a terminal you will be able to perform
 the [build instruction](#building-the-user-application).
@@ -190,13 +190,20 @@ images:
 > [!IMPORTANT]
 > The System Image only needs to be flashed once during development or on the
 > release of a new Flex SDK. The User Application is what you
-> will be developing so update it as you need. If you flash the System
+> will be developing, so update it as you need. If you flash the System
 > Image you must re-flash the User Application.
 
-The instructions below outline how to program the System Image and User
-Application via the command line. Myriota also provides the DeviceAssist GUI
-tool for programming devices. The DeviceAssist tool is available from the
-**Tools** section of the [Myriota Support Site](https://support.myriota.com/).
+There are multiple options for programming your FlexSense device.
+1. Using the updater.py script via the command line.
+2. Using the DeviceAssist PC tool for Windows or Linux that is available from the
+**Tools** section of the [Myriota Support Site](https://support.myriota.com/)
+3. Using the FlexAssist Mobile Application that is available on [Android](https://play.google.com/store/apps/details?id=com.myriota.binzel&hl=en) and [iOS](https://apps.apple.com/us/app/flexassist/id6474694371?uo=2)
+
+> [!IMPORTANT]
+> If you are flashing your firmware through the FlexAssist Mobile application by selecting the "local file" option on your device, the *.nonetwork.bin file must be used.
+> Don't forget to update your Network info after programming your user application for faster deployment of your FlexSense.
+
+The instructions below outline how to program the System Image and User Application via the command line.
 
 ### Programming On Linux
 

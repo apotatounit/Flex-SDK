@@ -1,7 +1,7 @@
 project(
   'flex_sdk',
   'c',
-  version: '2.3.1',
+  version: '2.4.0',
   meson_version: '>=0.61.2',
   default_options: [
     'c_std=gnu99',
@@ -61,7 +61,7 @@ else
   user_application_bin = custom_target('user_application.bin',
       output: [
         'user_application_raw.bin',
-        'user_application_build_key.bin',
+        'user_application.nonetwork.bin',
         'user_application.bin',
       ],
       input: user_application_elf,

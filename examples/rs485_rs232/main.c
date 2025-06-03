@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// An example running on Myriota's "FlexSense" board.
 // This example demonstrates RS-485/RS-232 interface communication between
 // an external device and the FlexSense Device.
 // This also demonstrates a basic modem application.

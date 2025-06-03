@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "flex_diag_conf.h"
 #include "flex_errors.h"
 
 /// @defgroup Version_Info Version Information
@@ -569,6 +570,40 @@ int FLEX_HWTest(void);
 /// Get the current system tick (1000 ticks per second).
 /// \return the current system tick
 uint32_t FLEX_TickGet(void);
+
+///@}
+
+/// @defgroup Power_Diag Power Diagnostics
+/// Diagnostics for the Power Subsystem
+///@{
+
+/// Reads the FlexSense's battery voltage in mV.
+/// \note When the FlexSense is operating on external power, the batteries
+/// voltage reports zero.
+/// \param[out] VoltageMilliVolts the current battery voltage im mV.
+/// \return FLEX_SUCCESS (0) if succeeded and < 0 if failed.
+/// \retval -FLEX_ERROR_ENOTRECOVERABLE: BLE module comms in a unrecoverable state.
+/// \retval -FLEX_ERROR_EPROTO: BLE module comms protocol error most likely a version miss match.
+/// \retval -FLEX_ERROR_ECOMM: Failed to communicate with the BLE module.
+int FLEX_GetBatteryVoltage(int32_t *const VoltageMilliVolts);
+
+// Reads is the FlexSense's is running on external power.
+/// \param[out] IsOnExternalPower current state of the external power.
+/// \return FLEX_SUCCESS (0) if succeeded and < 0 if failed.
+/// \retval -FLEX_ERROR_ENOTRECOVERABLE: BLE module comms in a unrecoverable state.
+/// \retval -FLEX_ERROR_EPROTO: BLE module comms protocol error most likely a version miss match.
+/// \retval -FLEX_ERROR_ECOMM: Failed to communicate with the BLE module.
+int FLEX_IsOnExternalPower(bool *const IsOnExternalPower);
+
+/// On External Power Handler Function Pointer Declaration.
+/// \param[in] IsOnExternalPower if the FlexSense is using external power or not.
+typedef void (*FLEX_OnExternalPowerHandler)(const bool *const IsOnExternalPower);
+
+/// Adds an event handler for when the external power state changes.
+/// \note There can only be one handler subscribed to the event at a time,
+/// so passing in a new handler will remove current one.
+/// \param[in] Handler the event handler to be called on external power state change.
+void FLEX_OnExternalPowerHandlerSet(const FLEX_OnExternalPowerHandler Handler);
 
 ///@}
 
