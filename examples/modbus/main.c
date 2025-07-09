@@ -55,6 +55,7 @@ static int serial_init(void *const ctx) {
   return FLEX_SerialInit(serial->protocol, serial->baud_rate);
 }
 
+// De-initialise the Serial interface for the lowest idle power consumption.
 static void serial_deinit(void *const ctx) {
   (void)ctx;
   FLEX_SerialDeinit();
@@ -124,7 +125,9 @@ static void read_temperature_and_humidity(int16_t *const temperature, int16_t *c
     printf("Sensor Read Failed: %d\n", result);
   }
 
+  // Enable/disable the Modbus driver in order to conserve power.
   MYRIOTA_ModbusDisable(handle);
+  // De-initialise the Power Out interface for the lowest idle power consumption.
   FLEX_PowerOutDeinit();
 }
 

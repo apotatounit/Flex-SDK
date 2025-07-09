@@ -1,13 +1,17 @@
 project(
   'flex_sdk',
   'c',
-  version: '2.4.0',
+  version: '2.5.0',
   meson_version: '>=0.61.2',
   default_options: [
     'c_std=gnu99',
     'warning_level=2',
     'werror=true',
     'buildtype=minsize',
+    'b_staticpic=false',
+    'b_asneeded=false',
+    'b_lto=true',
+    'b_lto_mode=default',
  ]
 )
 

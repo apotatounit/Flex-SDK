@@ -1,5 +1,14 @@
 # Changelog
 
+## Flex SDK Release v2.5.0
+
+* Improves the current version reporting in the terminal output.
+* Increases the space available for the user application.
+* Adds additional default device diagnostics.
+* Adds an RSSI measurement each time the BLE advertising is activated.
+* Updates the developer documentation to provide guidance on power management.
+* Fixes a bug that could cause the device temperature to be misread when the read is performed immediately after a sleep period that was 2 minutes or longer.
+
 ## Flex SDK Release v2.4.0
 
 #### Battery and power status
@@ -18,7 +27,7 @@ Adds the ability to store configuration and diagnostic values.
 * Adds the `configuration` example that demonstrates the usage of the configuration and diagnostic APIs.
 
 #### General
-* Adds the `i2c_bme280` example that demonstartes FlexSense interfacing with a BME280 sensor via I2C.
+* Adds the `i2c_bme280` example that demonstrates FlexSense interfacing with a BME280 sensor via I2C.
 * Updates the file extension of the compiled binaries that do not include network info to .nonetwork.bin.
 
 ## Flex SDK Release v2.3.1

@@ -21,7 +21,7 @@
 #include <sys/types.h>
 
 /** \defgroup Modbus Modbus Library
- * Flex Library versioning information.
+ * @brief Modbus communication interface
  * \{
  */
 
