@@ -1,5 +1,9 @@
 # Changelog
 
+## Flex SDK Release v2.5.1
+
+* Fixes a bug from v2.4.0 that prevented the External Digital I/O Wakeup event from being triggered. This fix ensures that the event operates as intended, restoring the expected functionality.
+
 ## Flex SDK Release v2.5.0
 
 * Improves the current version reporting in the terminal output.

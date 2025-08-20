@@ -7,3 +7,6 @@ This example demonstrates the FlexSense Device interfacing with a BME280 sensor 
 3. The FlexSense device reads the latest uncompensated Humidity measurement from the BME280 sensor.
 4. The latest measurement is scheduled for satellite transmission.
 5. Steps 3 and 4 are repeated on a fixed schedule of MESSAGES_PER_DAY.
+
+> [!TIP]
+> The I2C interface operates at 3.3V while the minimum voltage output that can be supplied by FlexSense is 5V. To ensure safe and reliable operation, the connected I2C slave device must be powered externally at 3.3V.

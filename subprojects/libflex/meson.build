@@ -1,6 +1,6 @@
 project('libflex',
   'c',
-  version: '1.7.0',
+  version: '1.7.1',
   meson_version: '>=0.61.2'
 )
 
@@ -10,7 +10,7 @@ flex_options_c = configure_file(
   configuration : {
     'skip_gnss' : get_option('skip_gnss').to_string(),
     'disable_ble_adv' : get_option('disable_ble_adv').to_string(),
-    'flex_sdk_version' : '2.5.0',
+    'flex_sdk_version' : '2.5.1',
   },
 )
 
