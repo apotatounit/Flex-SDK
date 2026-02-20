@@ -2,16 +2,19 @@ python = find_program('python3')
 
 examples = [
   { 'name': 'analog', 'dir': 'analog', 'option': [], 'deps': []},
+  { 'name': 'battery', 'dir': 'battery', 'option': [], 'deps': []},
   { 'name': 'blinky', 'dir': 'blinky', 'option': [], 'deps': []},
+  { 'name': 'configuration', 'dir': 'configuration', 'option': [], 'deps': []},
   { 'name': 'digital', 'dir': 'digital', 'option': [], 'deps': []},
   { 'name': 'event', 'dir': 'event', 'option': [], 'deps': []},
   { 'name': 'gnss', 'dir': 'gnss', 'option': [], 'deps': []},
   { 'name': 'hwtest', 'dir': 'hwtest', 'option': [], 'deps': []},
   { 'name': 'message', 'dir': 'message', 'option': [], 'deps': []},
+  { 'name': 'i2c_bme280', 'dir': 'i2c_bme280', 'option': [], 'deps': []},
   { 'name': 'pulse_counter', 'dir': 'pulse_counter', 'option': [], 'deps': []},
   { 'name': 'rs232', 'dir': 'rs485_rs232', 'option': ['-DSERIAL_INTERFACE=@0@'.format(0)], 'deps': []},
   { 'name': 'rs485', 'dir': 'rs485_rs232', 'option': ['-DSERIAL_INTERFACE=@0@'.format(1)], 'deps': []},
-  { 'name': 'modbus', 'dir': 'modbus', 'option': [], 'deps': [ modbus_dep ]},
+  { 'name': 'modbus', 'dir': 'modbus', 'option': [], 'deps': [ modbus_dep ]}
 ]
 
 fs = import('fs')
@@ -32,7 +35,7 @@ foreach example: examples
     example_bin = custom_target('@0@.bin'.format(example['name']),
         output: [
           '@0@_raw.bin'.format(example['name']),
-          '@0@.app.bin'.format(example['name']),
+          '@0@.nonetwork.bin'.format(example['name']),
           '@0@.bin'.format(example['name']),
         ],
         input: example_elf,

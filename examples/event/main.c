@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// An example running on Myriota's "FlexSense" board.
 // This example demonstrates the handling of an External Digital IO wakeup
 // event. RunsOnExtDigitalIOWakeup job is scheduled when the
 // External Digital IO is pulled Low.
