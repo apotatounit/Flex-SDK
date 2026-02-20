@@ -17,12 +17,12 @@
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT 5
 
-#define INTERVAL_WAKEUP_DEFAULT 30       // 30 seconds
+#define INTERVAL_WAKEUP_DEFAULT 10       // 30 seconds
 #define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
 // #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
 
-#define ENABLE_TRANSMIT 1
-#define ENABLE_MODBUS 1
+#define ENABLE_TRANSMIT 0
+#define ENABLE_MODBUS 0
 bool bInitModbusRequired = true; // only required on first init after power supply init
 #define LED_BLINK_DELAY 200      // ms
 
