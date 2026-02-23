@@ -121,6 +121,38 @@ information on how to use Codespaces is available in the
 > Note that using Codespaces may incur a cost. Refer to the Github
 > documentation for details regarding pricing, storage, and usage.
 
+### Building from macOS (via Codespace)
+
+If you develop on macOS (where the toolchain is not officially supported), you can
+build in a Codespace and pull the binaries locally using the GitHub CLI:
+
+1. Install the CLI and log in: `brew install gh && gh auth login`. To avoid typing your SSH key passphrase four times per run, use: `eval $(ssh-agent); ssh-add`
+2. Create or open a Codespace for this repo (e.g. from the GitHub repo page → Code → Codespaces).
+3. From the project root on your Mac, run:
+
+   ```shell
+   ./build-via-codespace.sh
+   ```
+
+   This runs `clean_build_skipgnss.sh` in the Codespace and downloads
+   `user_application.bin` (and `user_application.nonetwork.bin`) into `./build/`.
+
+   Use `./build-via-codespace.sh --push` to commit, push, then build and download.
+   Set `CODESPACE_NAME` if you have multiple codespaces; set `REMOTE_WORKSPACE` if
+   your repo is not at `/workspaces/Flex-SDK` in the container.
+
+4. To upload the binary to your FlexSense device (with the device connected via USB):
+
+   ```shell
+   pip3 install -r requirements.txt   # once, if not already installed)
+   ./scripts/updater.py -m ./build/user_application.bin
+   ```
+
+   One-shot: upload firmware, boot the device, and open the serial port for reading:
+   `./flash-and-listen.sh` (or `./flash-and-listen.sh /dev/cu.usbmodem1101` to specify the port).
+
+   On macOS with an externally managed Python, use a venv: `python3 -m venv .venv`, `source .venv/bin/activate`, then `pip install -r requirements.txt` and run the updater.
+
 ### Downloading libflex and system_image binaries
 
 > [!IMPORTANT]

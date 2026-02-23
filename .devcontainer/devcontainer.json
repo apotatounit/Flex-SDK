@@ -1,9 +1,14 @@
 {
-    "build": {
-      "dockerfile": "./Containerfile",
-      "context": "../"
-    },
-    "remoteEnv": {
-        "PATH": "${containerEnv:PATH}:${containerWorkspaceFolder}/scripts:/opt/gcc-arm-13_2_1/bin"
+  "build": {
+    "dockerfile": "./Containerfile",
+    "context": "../"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
     }
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:${containerWorkspaceFolder}/scripts:/opt/gcc-arm-13_2_1/bin"
+  }
 }
