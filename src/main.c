@@ -26,8 +26,8 @@
 /** Set to 1 to scan Modbus slaves 0x01..0x0F after init. Tune MODBUS_SCAN_SETTLE_MS to find minimal delay. */
 #define MODBUS_SCAN_AFTER_INIT 1
 #define MODBUS_SCAN_SETTLE_MS  50  /* minimal delay after Modbus_Init before scan (tune down to 0 to find minimum) */
-/** Diagnostic: 0=off, 1=power cycle sensor no Modbus reinit, 2=init Modbus unpowered, 3=min settle, 4=min settle+reinit, 5=max sample rate */
-#define MODBUS_DIAGNOSTIC_TEST 0
+/** Set to 1 to run all Modbus diagnostic tests sequentially at startup (power + Modbus only). */
+#define MODBUS_DIAGNOSTIC_TEST 1
 bool bInitModbusRequired = true;
 #define LED_BLINK_DELAY 200      // ms
 
@@ -388,7 +388,6 @@ static void BlinkLed(int count)
 }
 
 #if MODBUS_DIAGNOSTIC_TEST
-/** Try one Modbus temperature read; returns 0 on success. */
 static int TryOneModbusRead(float *out_temperature)
 {
   float t = MODBUS_TEMPERATURE_INVALID;
@@ -400,26 +399,20 @@ static int TryOneModbusRead(float *out_temperature)
 
 static time_t RunModbusDiagnostic(void)
 {
-  const int test = MODBUS_DIAGNOSTIC_TEST;
   time_t next_run_time = FLEX_TimeGet() + INTERVAL_WAKEUP_DEFAULT;
+  float t;
+  uint32_t t0, t1;
 
-  if (test == 1)
+  /* Test 1: Power cycle sensor without re-initing Modbus */
+  printf("\r\n=== Test 1: Power cycle sensor, Modbus stays init ===\r\n");
+  if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
+    printf("PowerOutInit failed\r\n");
+  else if (Modbus_Init() != 0)
+    printf("Modbus_Init failed\r\n");
+  else
   {
-    /* Test 1: Power cycle sensor without re-initing Modbus. */
-    printf("\r\n=== Test 1: Power cycle sensor, Modbus stays init ===\r\n");
-    if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
-    {
-      printf("PowerOutInit failed\r\n");
-      goto done;
-    }
-    if (Modbus_Init() != 0)
-    {
-      printf("Modbus_Init failed\r\n");
-      goto done;
-    }
     bInitModbusRequired = false;
     FLEX_DelayMs(200);
-    float t;
     if (TryOneModbusRead(&t))
       printf("Initial read failed\r\n");
     else
@@ -427,58 +420,50 @@ static time_t RunModbusDiagnostic(void)
     for (int cycle = 0; cycle < 3; cycle++)
     {
       FLEX_PowerOutDeinit();
-      printf("Sensor power off, 2s...\r\n");
       FLEX_DelayMs(2000);
       FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
       FLEX_DelayMs(100);
       if (TryOneModbusRead(&t))
         printf("  Cycle %d: read FAIL after 100ms settle\r\n", cycle + 1);
       else
-        printf("  Cycle %d: read OK %.1f °C after 100ms settle\r\n", cycle + 1, (double)t);
+        printf("  Cycle %d: read OK %.1f °C\r\n", cycle + 1, (double)t);
     }
     Modbus_Deinit();
     bInitModbusRequired = true;
     FLEX_PowerOutDeinit();
   }
-  else if (test == 2)
+
+  /* Test 2: Init Modbus with sensor unpowered, then power up and read */
+  printf("\r\n=== Test 2: Init Modbus without sensor powered ===\r\n");
+  if (Modbus_Init() != 0)
+    printf("Modbus_Init (sensor off) failed\r\n");
+  else
   {
-    /* Test 2: Init Modbus with sensor unpowered, then power up, wait, read. */
-    printf("\r\n=== Test 2: Init Modbus without sensor powered ===\r\n");
-    if (Modbus_Init() != 0)
-    {
-      printf("Modbus_Init (sensor off) failed\r\n");
-      goto done;
-    }
     bInitModbusRequired = false;
-    printf("Sensor power on, wait 200 ms...\r\n");
     FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
     FLEX_DelayMs(200);
-    float t;
-    uint32_t t0 = FLEX_TickGet();
+    t0 = FLEX_TickGet();
     int r = TryOneModbusRead(&t);
-    uint32_t t1 = FLEX_TickGet();
+    t1 = FLEX_TickGet();
     printf("Read: %s, %.1f °C, duration %lu ticks\r\n", r ? "FAIL" : "OK", (double)t, (unsigned long)(t1 - t0));
     Modbus_Deinit();
     bInitModbusRequired = true;
     FLEX_PowerOutDeinit();
   }
-  else if (test == 3)
+
+  /* Test 3: Min settle time (sensor power up, Modbus already init) */
+  printf("\r\n=== Test 3: Min settle (Modbus already init) ===\r\n");
+  FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
+  if (Modbus_Init() != 0)
   {
-    /* Test 3: Min settle time with Modbus already init, sensor power cycled. */
-    printf("\r\n=== Test 3: Min settle (sensor power up, Modbus already init) ===\r\n");
-    FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
-    if (Modbus_Init() != 0)
-    {
-      printf("Modbus_Init failed\r\n");
-      goto done;
-    }
+    printf("Modbus_Init failed\r\n");
+    FLEX_PowerOutDeinit();
+  }
+  else
+  {
     bInitModbusRequired = false;
     FLEX_DelayMs(500);
-    float t;
-    if (TryOneModbusRead(&t))
-      printf("Pre-cycle read failed\r\n");
-    else
-      printf("Pre-cycle read OK: %.1f °C\r\n", (double)t);
+    TryOneModbusRead(&t);
     static const unsigned int settle_list[] = {0, 25, 50, 75, 100, 150, 200, 300, 500};
     for (size_t i = 0; i < sizeof(settle_list) / sizeof(settle_list[0]); i++)
     {
@@ -498,10 +483,10 @@ static time_t RunModbusDiagnostic(void)
     bInitModbusRequired = true;
     FLEX_PowerOutDeinit();
   }
-  else if (test == 4)
+
+  /* Test 4: Min settle with Modbus reinit each power cycle */
+  printf("\r\n=== Test 4: Min settle with Modbus reinit each cycle ===\r\n");
   {
-    /* Test 4: Min settle with Modbus reinit on every sensor power cycle. */
-    printf("\r\n=== Test 4: Min settle with Modbus reinit each power cycle ===\r\n");
     static const unsigned int settle_list[] = {0, 25, 50, 75, 100, 150, 200, 300, 500};
     for (size_t i = 0; i < sizeof(settle_list) / sizeof(settle_list[0]); i++)
     {
@@ -516,14 +501,14 @@ static time_t RunModbusDiagnostic(void)
       if (Modbus_Init() != 0)
       {
         printf("  settle %u ms: Modbus_Init failed\r\n", settle_ms);
+        FLEX_PowerOutDeinit();
         continue;
       }
       bInitModbusRequired = false;
       FLEX_DelayMs(settle_ms);
-      float t;
       if (!TryOneModbusRead(&t))
       {
-        printf("Min settle (with reinit): %u ms -> read OK %.1f °C\r\n", settle_ms, (double)t);
+        printf("Min settle (reinit): %u ms -> read OK %.1f °C\r\n", settle_ms, (double)t);
         Modbus_Deinit();
         bInitModbusRequired = true;
         FLEX_PowerOutDeinit();
@@ -535,22 +520,22 @@ static time_t RunModbusDiagnostic(void)
       FLEX_PowerOutDeinit();
     }
   }
-  else if (test == 5)
+
+  /* Test 5: Max sampling rate – read duration and variable interval */
+  printf("\r\n=== Test 5: Max sampling rate ===\r\n");
+  FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
+  if (Modbus_Init() != 0)
   {
-    /* Test 5: Max sampling rate – measure read duration and try variable interval. */
-    printf("\r\n=== Test 5: Max sampling rate (read duration, variable interval) ===\r\n");
-    FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
-    if (Modbus_Init() != 0)
-    {
-      printf("Modbus_Init failed\r\n");
-      goto done;
-    }
+    printf("Modbus_Init failed\r\n");
+    FLEX_PowerOutDeinit();
+  }
+  else
+  {
     bInitModbusRequired = false;
     FLEX_DelayMs(300);
-    float t;
-    uint32_t t0 = FLEX_TickGet();
+    t0 = FLEX_TickGet();
     int r = TryOneModbusRead(&t);
-    uint32_t t1 = FLEX_TickGet();
+    t1 = FLEX_TickGet();
     printf("Single read: %s, %.1f °C, duration %lu ticks\r\n", r ? "FAIL" : "OK", (double)t, (unsigned long)(t1 - t0));
     static const unsigned int intervals[] = {0, 50, 100, 200, 500};
     for (size_t i = 0; i < sizeof(intervals) / sizeof(intervals[0]); i++)
@@ -558,30 +543,25 @@ static time_t RunModbusDiagnostic(void)
       unsigned int interval_ms = intervals[i];
       unsigned int ok = 0, fail = 0;
       uint32_t sum_ticks = 0;
-      const int num_reads = 5;
-      for (int k = 0; k < num_reads; k++)
+      for (int k = 0; k < 5; k++)
       {
         if (interval_ms && k > 0)
           FLEX_DelayMs(interval_ms);
-        uint32_t a = FLEX_TickGet();
+        t0 = FLEX_TickGet();
         int res = TryOneModbusRead(&t);
-        uint32_t b = FLEX_TickGet();
-        sum_ticks += (b - a);
-        if (res)
-          fail++;
-        else
-          ok++;
+        t1 = FLEX_TickGet();
+        sum_ticks += (t1 - t0);
+        if (res) fail++; else ok++;
       }
-      printf("  interval %u ms: %u OK, %u fail, avg read duration %lu ticks\r\n",
-          interval_ms, ok, fail, (unsigned long)(sum_ticks / num_reads));
+      printf("  interval %u ms: %u OK, %u fail, avg duration %lu ticks\r\n",
+          interval_ms, ok, fail, (unsigned long)(sum_ticks / 5));
     }
     Modbus_Deinit();
     bInitModbusRequired = true;
     FLEX_PowerOutDeinit();
   }
 
-done:
-  printf("\r\n=== Diagnostic test %d done ===\r\n", test);
+  printf("\r\n=== Modbus diagnostics done ===\r\n");
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
   return next_run_time;
 }
