@@ -20,7 +20,7 @@
 
 // Test parameters
 #define ANALOG_READ_COUNT 10
-#define INTER_CYCLE_DELAY_MS 3000
+#define INTER_CYCLE_DELAY_MS 1000
 
 // Stability criteria
 #define ANALOG_STD_DEV_THRESHOLD_MV 10
