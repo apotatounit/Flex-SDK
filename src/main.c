@@ -4,41 +4,41 @@
 #include <math.h>
 #include "flex.h"
 
-#define APPLICATION_NAME "Analog Input - Minimal Settle Time & Sampling Interval"
+#define APPLICATION_NAME "Pulse Interrupt Sensor - Timing Calibration"
 
-// Fixed power-up delay (we know 0-100ms works)
-#define ANALOG_POWERUP_DELAY_MS 100
+// Test ranges for pulse sensor
+#define PULSE_POWERUP_DELAY_MIN_MS 0
+#define PULSE_POWERUP_DELAY_MAX_MS 1000
+#define PULSE_POWERUP_DELAY_STEP_MS 10
 
-// Test ranges for settle time and sampling interval
-#define SETTLE_TIME_MIN_MS 0
-#define SETTLE_TIME_MAX_MS 200
-#define SETTLE_TIME_STEP_MS 10
-
-#define SAMPLE_INTERVAL_MIN_MS 0
-#define SAMPLE_INTERVAL_MAX_MS 20
-#define SAMPLE_INTERVAL_STEP_MS 1
+#define PULSE_INIT_DELAY_MIN_MS 0
+#define PULSE_INIT_DELAY_MAX_MS 200
+#define PULSE_INIT_DELAY_STEP_MS 5
 
 // Test parameters
-#define ANALOG_READ_COUNT 10
+#define PULSE_COUNT_WINDOW_MS 1000  // Count pulses for 1 second
+#define PULSE_READ_ITERATIONS 10    // Number of consecutive init/deinit cycles per test
 #define INTER_CYCLE_DELAY_MS 1000
-
-// Stability criteria
-#define ANALOG_STD_DEV_THRESHOLD_MV 10
-#define ANALOG_TARGET_VOLTAGE_V 1.0f
-#define ANALOG_TARGET_TOLERANCE_V 0.05f
 
 // Sensor configuration
 #define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
-#define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
+#define PULSE_WAKEUP_COUNT 0
 
 typedef struct
 {
-  float mean;
-  float std_dev;
-  float min;
-  float max;
-  uint32_t count;
-} StabilityStats;
+  uint32_t pulse_count;
+  float rate_ppm;  // pulses per minute
+  bool sensor_alive;
+} PulseReading;
+
+typedef struct
+{
+  float mean_rate;
+  float std_dev_rate;
+  uint32_t min_count;
+  uint32_t max_count;
+  uint32_t valid_readings;
+} PulseStats;
 
 static void PowerOn(void)
 {
@@ -53,129 +53,148 @@ static void PowerOff(void)
   FLEX_PowerOutDeinit();
 }
 
-static void CalculateStability(float *readings, uint32_t count, StabilityStats *stats)
+static bool IsPulseSensorAlive(uint32_t pulse_count, float *rates, uint32_t rate_count)
+{
+  // Sensor alive if: pulse count > 1 AND rate is relatively stable
+  if (pulse_count <= 1)
+    return false;
+
+  if (rate_count < 2)
+    return true; // Need at least 2 readings to check stability
+
+  // Check if rates are relatively stable (variation < 20%)
+  float avg_rate = 0;
+  for (uint32_t i = 0; i < rate_count; i++)
+  {
+    avg_rate += rates[i];
+  }
+  avg_rate /= rate_count;
+
+  float max_deviation = 0;
+  for (uint32_t i = 0; i < rate_count; i++)
+  {
+    float deviation = fabsf(rates[i] - avg_rate) / avg_rate;
+    if (deviation > max_deviation)
+      max_deviation = deviation;
+  }
+
+  return max_deviation < 0.2f; // 20% tolerance
+}
+
+static void CalculatePulseStats(PulseReading *readings, uint32_t count, PulseStats *stats)
 {
   if (count == 0)
   {
-    stats->mean = 0;
-    stats->std_dev = 0;
-    stats->min = 0;
-    stats->max = 0;
-    stats->count = 0;
+    stats->mean_rate = 0;
+    stats->std_dev_rate = 0;
+    stats->min_count = 0;
+    stats->max_count = 0;
+    stats->valid_readings = 0;
     return;
   }
 
-  float sum = 0;
-  stats->min = readings[0];
-  stats->max = readings[0];
+  float sum_rate = 0;
+  stats->min_count = readings[0].pulse_count;
+  stats->max_count = readings[0].pulse_count;
+  uint32_t valid = 0;
+
   for (uint32_t i = 0; i < count; i++)
   {
-    sum += readings[i];
-    if (readings[i] < stats->min)
-      stats->min = readings[i];
-    if (readings[i] > stats->max)
-      stats->max = readings[i];
+    if (readings[i].sensor_alive)
+    {
+      sum_rate += readings[i].rate_ppm;
+      if (readings[i].pulse_count < stats->min_count)
+        stats->min_count = readings[i].pulse_count;
+      if (readings[i].pulse_count > stats->max_count)
+        stats->max_count = readings[i].pulse_count;
+      valid++;
+    }
   }
-  stats->mean = sum / count;
-  stats->count = count;
 
+  if (valid == 0)
+  {
+    stats->mean_rate = 0;
+    stats->std_dev_rate = 0;
+    stats->valid_readings = 0;
+    return;
+  }
+
+  stats->mean_rate = sum_rate / valid;
+  stats->valid_readings = valid;
+
+  // Calculate standard deviation
   float variance = 0;
   for (uint32_t i = 0; i < count; i++)
   {
-    float diff = readings[i] - stats->mean;
-    variance += diff * diff;
+    if (readings[i].sensor_alive)
+    {
+      float diff = readings[i].rate_ppm - stats->mean_rate;
+      variance += diff * diff;
+    }
   }
-  stats->std_dev = sqrtf(variance / count);
+  stats->std_dev_rate = sqrtf(variance / valid);
 }
 
-static bool IsStable(StabilityStats *stats)
-{
-  bool low_noise = (stats->std_dev * 1000.0f) < ANALOG_STD_DEV_THRESHOLD_MV;
-  bool on_target = fabsf(stats->mean - ANALOG_TARGET_VOLTAGE_V) < ANALOG_TARGET_TOLERANCE_V;
-  return low_noise && on_target;
-}
-
-static bool TestSettleAndInterval(uint32_t settle_ms, uint32_t interval_ms, StabilityStats *stats_out)
+static bool TestPulsePowerUpDelay(uint32_t delay_ms, PulseReading *reading_out)
 {
   PowerOn();
-  FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
+  FLEX_DelayMs(delay_ms);
 
-  if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
+  if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS) != 0)
   {
     PowerOff();
     return false;
   }
-  
-  // Wait for settle time (instead of discarding samples)
-  FLEX_DelayMs(settle_ms);
 
-  // Take readings with specified interval
-  float readings[ANALOG_READ_COUNT];
-  uint32_t valid_count = 0;
-  
-  for (int i = 0; i < ANALOG_READ_COUNT; i++)
-  {
-    uint32_t raw_mv = UINT32_MAX;
-    int result = FLEX_AnalogInputReadVoltage(&raw_mv);
-    
-    if (result == 0 && raw_mv != UINT32_MAX)
-    {
-      readings[valid_count] = raw_mv / 1000.0f;
-      valid_count++;
-    }
-    
-    if (i < ANALOG_READ_COUNT - 1 && interval_ms > 0)
-    {
-      FLEX_DelayMs(interval_ms);
-    }
-  }
+  uint32_t start_tick = FLEX_TickGet();
+  FLEX_DelayMs(PULSE_COUNT_WINDOW_MS);
+  uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
+  uint32_t end_tick = FLEX_TickGet();
+  uint32_t duration_ms = end_tick - start_tick;
 
-  if (valid_count == 0)
-  {
-    FLEX_AnalogInputDeinit();
-    PowerOff();
-    return false;
-  }
-
-  CalculateStability(readings, valid_count, stats_out);
-  
-  FLEX_AnalogInputDeinit();
+  FLEX_PulseCounterDeinit();
   PowerOff();
-  
+
+  float rate_ppm = (duration_ms > 0) ? (pulse_count * 60000.0f / duration_ms) : 0;
+  float rates[1] = {rate_ppm};
+  bool alive = IsPulseSensorAlive(pulse_count, rates, 1);
+
+  reading_out->pulse_count = pulse_count;
+  reading_out->rate_ppm = rate_ppm;
+  reading_out->sensor_alive = alive;
+
   return true;
 }
 
-static void TestMinimalSettleTime(void)
+static void TestPulsePowerUpDelay(void)
 {
-  printf("\r\n=== Test 1: Minimal Settle Time (after analog init) ===\r\n");
-  printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
-  printf("Sample interval: 50ms (fixed)\r\n");
-  printf("Sweep settle time: %u-%u ms, step: %u ms\r\n",
-         SETTLE_TIME_MIN_MS, SETTLE_TIME_MAX_MS, SETTLE_TIME_STEP_MS);
-  printf("Format: settle(ms) | mean(V) | std_dev(mV) | range(V) | stable\r\n");
+  printf("\r\n=== Test 1: Pulse Sensor Power-Up Delay ===\r\n");
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         PULSE_POWERUP_DELAY_MIN_MS, PULSE_POWERUP_DELAY_MAX_MS, PULSE_POWERUP_DELAY_STEP_MS);
+  printf("Count window: %ums\r\n", PULSE_COUNT_WINDOW_MS);
+  printf("Format: delay(ms) | count | rate(ppm) | alive\r\n");
   printf("------------------------------------------------------------\r\n");
 
-  uint32_t min_stable_settle = UINT32_MAX;
+  uint32_t min_stable_delay = UINT32_MAX;
   bool found_stable = false;
 
-  for (uint32_t settle = SETTLE_TIME_MIN_MS; settle <= SETTLE_TIME_MAX_MS; settle += SETTLE_TIME_STEP_MS)
+  for (uint32_t delay = PULSE_POWERUP_DELAY_MIN_MS; delay <= PULSE_POWERUP_DELAY_MAX_MS; delay += PULSE_POWERUP_DELAY_STEP_MS)
   {
-    StabilityStats stats;
-    if (!TestSettleAndInterval(settle, 50, &stats))
+    PulseReading reading;
+    if (!TestPulsePowerUpDelay(delay, &reading))
     {
-      printf("settle=%lu | ERROR: Test failed\r\n", settle);
+      printf("delay=%lu | ERROR: Test failed\r\n", delay);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
       continue;
     }
 
-    bool stable = IsStable(&stats);
-    printf("settle=%lu | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s\r\n",
-           settle, stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max,
-           stable ? "YES" : "no");
+    printf("delay=%lu | count=%lu | rate=%.1fppm | alive=%s\r\n",
+           delay, (unsigned long)reading.pulse_count, reading.rate_ppm,
+           reading.sensor_alive ? "YES" : "no");
 
-    if (stable && settle < min_stable_settle)
+    if (reading.sensor_alive && delay < min_stable_delay)
     {
-      min_stable_settle = settle;
+      min_stable_delay = delay;
       found_stable = true;
     }
 
@@ -185,169 +204,114 @@ static void TestMinimalSettleTime(void)
   printf("\r\n=== Results ===\r\n");
   if (found_stable)
   {
-    printf("Minimum stable settle time: %lu ms\r\n", min_stable_settle);
+    printf("Minimum stable power-up delay: %lu ms\r\n", min_stable_delay);
   }
   else
   {
-    printf("No stable settle time found in range\r\n");
+    printf("No stable delay found in range\r\n");
   }
 }
 
-static void TestMinimalSampleInterval(void)
+static bool TestPulseInitCycleDelay(uint32_t powerup_delay_ms, uint32_t init_delay_ms, PulseStats *stats_out)
 {
-  // Use minimum stable settle time: 130ms
-  const uint32_t SETTLE_TIME_FOR_INTERVAL_TEST_MS = 130;
-  
-  printf("\r\n=== Test 2: Minimal Sample Interval ===\r\n");
-  printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
-  printf("Settle time: %lums (fixed, using minimum stable from Test 1)\r\n", (unsigned long)SETTLE_TIME_FOR_INTERVAL_TEST_MS);
-  printf("Sweep sample interval: %u-%u ms, step: %u ms\r\n",
-         SAMPLE_INTERVAL_MIN_MS, SAMPLE_INTERVAL_MAX_MS, SAMPLE_INTERVAL_STEP_MS);
-  printf("Format: interval(ms) | mean(V) | std_dev(mV) | range(V) | stable\r\n");
-  printf("------------------------------------------------------------\r\n");
-
-  uint32_t min_stable_interval = UINT32_MAX;
-  bool found_stable = false;
-
-  for (uint32_t interval = SAMPLE_INTERVAL_MIN_MS; interval <= SAMPLE_INTERVAL_MAX_MS; interval += SAMPLE_INTERVAL_STEP_MS)
-  {
-    StabilityStats stats;
-    if (!TestSettleAndInterval(SETTLE_TIME_FOR_INTERVAL_TEST_MS, interval, &stats))
-    {
-      printf("interval=%lu | ERROR: Test failed\r\n", interval);
-      FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
-      continue;
-    }
-
-    bool stable = IsStable(&stats);
-    printf("interval=%lu | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s\r\n",
-           interval, stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max,
-           stable ? "YES" : "no");
-
-    if (stable && interval < min_stable_interval)
-    {
-      min_stable_interval = interval;
-      found_stable = true;
-    }
-
-    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
-  }
-
-  printf("\r\n=== Results ===\r\n");
-  if (found_stable)
-  {
-    printf("Minimum stable sample interval: %lu ms\r\n", min_stable_interval);
-  }
-  else
-  {
-    printf("No stable sample interval found in range\r\n");
-  }
-}
-
-static void TestVerificationWithMinimums(void)
-{
-  const uint32_t MIN_SETTLE_MS = 130;
-  const uint32_t MIN_INTERVAL_MS = 1;
-  
-  printf("\r\n=== Test 3: Verification with Minimum Values ===\r\n");
-  printf("Using minimum values: power-up=%ums, settle=%lums, interval=%lums\r\n",
-         ANALOG_POWERUP_DELAY_MS, (unsigned long)MIN_SETTLE_MS, (unsigned long)MIN_INTERVAL_MS);
-  printf("Running 5 cycles to verify stability...\r\n");
-  printf("Format: cycle | mean(V) | std_dev(mV) | range(V) | stable\r\n");
-  printf("------------------------------------------------------------\r\n");
-
-  for (int cycle = 1; cycle <= 5; cycle++)
-  {
-    StabilityStats stats;
-    if (!TestSettleAndInterval(MIN_SETTLE_MS, MIN_INTERVAL_MS, &stats))
-    {
-      printf("cycle=%d | ERROR: Test failed\r\n", cycle);
-      FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
-      continue;
-    }
-
-    bool stable = IsStable(&stats);
-    printf("cycle=%d | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s\r\n",
-           cycle, stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max,
-           stable ? "YES" : "no");
-
-    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
-  }
-  
-  printf("\r\n=== Verification Complete ===\r\n");
-}
-
-static void TestReadingFrequency(void)
-{
-  const uint32_t SETTLE_MS = 130;
-  const uint32_t INTERVAL_MS = 1;
-  const uint32_t NUM_READINGS = 100;  // Test with many consecutive readings
-  
-  printf("\r\n=== Test 4: Reading Frequency Test ===\r\n");
-  printf("Power-up delay: %ums, Settle: %lums, Interval: %lums\r\n",
-         ANALOG_POWERUP_DELAY_MS, (unsigned long)SETTLE_MS, (unsigned long)INTERVAL_MS);
-  printf("Taking %lu consecutive readings to test frequency...\r\n", (unsigned long)NUM_READINGS);
-  
   PowerOn();
-  FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
-  
-  if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
+  FLEX_DelayMs(powerup_delay_ms);
+
+  PulseReading readings[PULSE_READ_ITERATIONS];
+  float rates[PULSE_READ_ITERATIONS];
+
+  for (int i = 0; i < PULSE_READ_ITERATIONS; i++)
   {
-    printf("ERROR: Failed to init analog input\r\n");
-    PowerOff();
-    return;
-  }
-  
-  FLEX_DelayMs(SETTLE_MS);
-  
-  float readings[NUM_READINGS];
-  uint32_t valid_count = 0;
-  uint32_t start_tick = FLEX_TickGet();
-  
-  for (uint32_t i = 0; i < NUM_READINGS; i++)
-  {
-    uint32_t raw_mv = UINT32_MAX;
-    int result = FLEX_AnalogInputReadVoltage(&raw_mv);
-    
-    if (result == 0 && raw_mv != UINT32_MAX)
+    if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS) != 0)
     {
-      readings[valid_count] = raw_mv / 1000.0f;
-      valid_count++;
+      PowerOff();
+      return false;
     }
-    
-    if (i < NUM_READINGS - 1 && INTERVAL_MS > 0)
+
+    uint32_t start_tick = FLEX_TickGet();
+    FLEX_DelayMs(PULSE_COUNT_WINDOW_MS);
+    uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
+    uint32_t end_tick = FLEX_TickGet();
+    uint32_t duration_ms = end_tick - start_tick;
+
+    FLEX_PulseCounterDeinit();
+
+    float rate_ppm = (duration_ms > 0) ? (pulse_count * 60000.0f / duration_ms) : 0;
+    rates[i] = rate_ppm;
+    readings[i].pulse_count = pulse_count;
+    readings[i].rate_ppm = rate_ppm;
+
+    // Delay between init/deinit cycles (not between reads - counter is interrupt-driven)
+    if (init_delay_ms > 0 && i < PULSE_READ_ITERATIONS - 1)
     {
-      FLEX_DelayMs(INTERVAL_MS);
+      FLEX_DelayMs(init_delay_ms);
     }
   }
-  
-  uint32_t end_tick = FLEX_TickGet();
-  uint32_t total_time_ms = end_tick - start_tick;
-  
-  FLEX_AnalogInputDeinit();
+
   PowerOff();
-  
-  if (valid_count > 0)
+
+  // Check if sensor is alive for each reading
+  for (int i = 0; i < PULSE_READ_ITERATIONS; i++)
   {
-    StabilityStats stats;
-    CalculateStability(readings, valid_count, &stats);
-    bool stable = IsStable(&stats);
-    
-    float avg_time_per_read = (float)total_time_ms / valid_count;
-    float reads_per_second = 1000.0f / avg_time_per_read;
-    
-    printf("Results: %lu valid readings in %lu ms\r\n", (unsigned long)valid_count, total_time_ms);
-    printf("Mean: %.3fV, Std dev: %.1fmV, Range: %.3f-%.3fV\r\n",
-           stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max);
-    printf("Average time per read: %.2f ms (%.1f reads/sec)\r\n", avg_time_per_read, reads_per_second);
-    printf("Stable: %s\r\n", stable ? "YES" : "no");
+    readings[i].sensor_alive = IsPulseSensorAlive(readings[i].pulse_count, rates, PULSE_READ_ITERATIONS);
+  }
+
+  CalculatePulseStats(readings, PULSE_READ_ITERATIONS, stats_out);
+  return true;
+}
+
+static void TestPulseInitCycleDelay(void)
+{
+  const uint32_t POWERUP_DELAY_MS = 100;  // Use minimum from power-up test
+  
+  printf("\r\n=== Test 2: Pulse Sensor Init/Deinit Cycle Delay ===\r\n");
+  printf("Power-up delay: %ums (fixed)\r\n", POWERUP_DELAY_MS);
+  printf("Sweep delay between init/deinit cycles: %u-%u ms, step: %u ms\r\n",
+         PULSE_INIT_DELAY_MIN_MS, PULSE_INIT_DELAY_MAX_MS, PULSE_INIT_DELAY_STEP_MS);
+  printf("Count window: %ums per cycle, %d cycles\r\n", PULSE_COUNT_WINDOW_MS, PULSE_READ_ITERATIONS);
+  printf("Note: Counter is interrupt-driven, no delay needed between reads\r\n");
+  printf("Format: cycle_delay(ms) | avg_rate(ppm) | std_dev(ppm) | count_range | stable\r\n");
+  printf("------------------------------------------------------------\r\n");
+
+  uint32_t min_stable_delay = UINT32_MAX;
+  bool found_stable = false;
+
+  for (uint32_t delay = PULSE_INIT_DELAY_MIN_MS; delay <= PULSE_INIT_DELAY_MAX_MS; delay += PULSE_INIT_DELAY_STEP_MS)
+  {
+    PulseStats stats;
+    if (!TestPulseInitCycleDelay(POWERUP_DELAY_MS, delay, &stats))
+    {
+      printf("delay=%lu | ERROR: Test failed\r\n", delay);
+      FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+      continue;
+    }
+
+    // Consider stable if std dev is reasonable and we have valid readings
+    bool stable = (stats.valid_readings > 0) && (stats.std_dev_rate < 100.0f); // 100 ppm tolerance
+
+    printf("delay=%lu | avg_rate=%.1fppm | std_dev=%.1fppm | count=%lu-%lu | stable=%s\r\n",
+           delay, stats.mean_rate, stats.std_dev_rate,
+           (unsigned long)stats.min_count, (unsigned long)stats.max_count,
+           stable ? "YES" : "no");
+
+    if (stable && delay < min_stable_delay)
+    {
+      min_stable_delay = delay;
+      found_stable = true;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  printf("\r\n=== Results ===\r\n");
+  if (found_stable)
+  {
+    printf("Minimum stable cycle delay: %lu ms\r\n", min_stable_delay);
   }
   else
   {
-    printf("ERROR: No valid readings\r\n");
+    printf("No stable cycle delay found in range\r\n");
   }
-  
-  printf("\r\n=== Reading Frequency Test Complete ===\r\n");
 }
 
 void FLEX_AppInit()
@@ -355,10 +319,8 @@ void FLEX_AppInit()
   printf("\r\n%s\r\n", APPLICATION_NAME);
   printf("Compiled on %s at %s\r\n", __DATE__, __TIME__);
 
-  TestMinimalSettleTime();
-  TestMinimalSampleInterval();
-  TestVerificationWithMinimums();
-  TestReadingFrequency();
+  TestPulsePowerUpDelay();
+  TestPulseInitCycleDelay();
 
   printf("\r\n=== All Tests Complete ===\r\n");
 }
