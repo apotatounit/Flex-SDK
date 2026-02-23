@@ -13,9 +13,10 @@
 
 // Test parameters
 #define ANALOG_READ_COUNT 10              // More readings for better statistics
-#define ANALOG_SETTLE_AFTER_INIT_MS 100   // Reduced - we're testing power-up delay, not init delay
-#define ANALOG_SAMPLE_INTERVAL_MS 50      // Shorter interval but still spaced
-#define INTER_CYCLE_DELAY_MS 3000         // Reduced cycle delay for faster testing
+#define ANALOG_SETTLE_AFTER_INIT_MS 300   // Increased settle time after analog init
+#define ANALOG_DISCARD_SAMPLES 3          // Discard first N samples after settling
+#define ANALOG_SAMPLE_INTERVAL_MS 100     // Longer interval between samples for stability
+#define INTER_CYCLE_DELAY_MS 5000         // Longer cycle delay to ensure clean state
 
 // Stability criteria
 #define ANALOG_STD_DEV_THRESHOLD_MV 10    // Readings stable if std dev < 10mV
@@ -120,7 +121,15 @@ static void TestAnalogPowerUpDelay(void)
     
     FLEX_DelayMs(ANALOG_SETTLE_AFTER_INIT_MS);
 
-    // Take readings
+    // Discard initial unstable samples
+    for (int i = 0; i < ANALOG_DISCARD_SAMPLES; i++)
+    {
+      uint32_t raw_mv = UINT32_MAX;
+      FLEX_AnalogInputReadVoltage(&raw_mv); // Read and discard
+      FLEX_DelayMs(ANALOG_SAMPLE_INTERVAL_MS);
+    }
+
+    // Take actual readings
     float readings[ANALOG_READ_COUNT];
     uint32_t valid_count = 0;
     
