@@ -71,8 +71,10 @@ static uint32_t MeasureAnalogInput(void) {
   }
 #endif
 
+  // De-initialise the Analog Input for the lowest idle power consumption.
   FLEX_AnalogInputDeinit();
 fail_1:
+  // De-initialise the Power Out interface for the lowest idle power consumption.
   FLEX_PowerOutDeinit();
 fail_0:
   return SensorReading;

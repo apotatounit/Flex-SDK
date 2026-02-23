@@ -1,5 +1,51 @@
 # Changelog
 
+## Flex SDK Release v2.5.1
+
+* Fixes a bug from v2.4.0 that prevented the External Digital I/O Wakeup event from being triggered. This fix ensures that the event operates as intended, restoring the expected functionality.
+
+## Flex SDK Release v2.5.0
+
+* Improves the current version reporting in the terminal output.
+* Increases the space available for the user application.
+* Adds additional default device diagnostics.
+* Adds an RSSI measurement each time the BLE advertising is activated.
+* Updates the developer documentation to provide guidance on power management.
+* Fixes a bug that could cause the device temperature to be misread when the read is performed immediately after a sleep period that was 2 minutes or longer.
+
+## Flex SDK Release v2.4.0
+
+#### Battery and power status
+* Adds `FLEX_GetBatteryVoltage` API to return the battery voltage in mV.
+* Adds `FLEX_IsOnExternalPower` API to return if FlexSense is powered externally or via battery power.
+* Adds `FLEX_OnExternalPowerHandlerSet` API to create an event handler for when the external power state changes.
+* Adds the `battery` example that demonstrates the usage of the battery and power status APIs.
+
+#### Configuration and diagnostics
+Adds the ability to store configuration and diagnostic values.
+* Configuration values persist through resets and can be updated via Bluetooth using the FlexAssist mobile application.
+* Diagnostic values are set to persist through resets or not and can be viewed but not updated over Bluetooth using the FlexAssist mobile application.
+* Adds `FLEX_DiagConfValueWrite` API to write a configuration or diagnostic value to memory.
+* Adds `FLEX_DiagConfValueRead` API to read a configuration or diagnostic value to memory.
+* Adds `FLEX_DiagConfValueNotifyHandlerSet` to create an event handler for when a configuration or diagnostic value changes.
+* Adds the `configuration` example that demonstrates the usage of the configuration and diagnostic APIs.
+
+#### General
+* Adds the `i2c_bme280` example that demonstrates FlexSense interfacing with a BME280 sensor via I2C.
+* Updates the file extension of the compiled binaries that do not include network info to .nonetwork.bin.
+
+## Flex SDK Release v2.3.1
+
+* Fix issue where the default serial configuration was set to nine databits.
+
+## Flex SDK Release v2.3.0
+
+* Adds support to transmit messages larger than 20 bytes.
+* Adds `FLEX_MessageSlotsFree` API to return the number of messages that can be scheduled in the message queue
+* Allow user applications to control the onboard blue LED using `FLEX_LEDBlueStateSet`.
+* Adds Serial interface configuration options for message stopbits and databits.
+* Fixed an issue with Serial interface parity settings.
+
 ## Flex SDK Release v2.2.4
 
 * Fix issue where `FLEX_SerialDeinit(void)` was not correctly turning off RS232
