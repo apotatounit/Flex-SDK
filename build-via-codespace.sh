@@ -84,7 +84,7 @@ if [[ -z "${CODESPACE_NAME:-}" ]]; then
 fi
 
 echo "==> Running build in Codespace ($CODESPACE_NAME)..."
-gh codespace ssh -c "$CODESPACE_NAME" -- "cd $REMOTE_WORKSPACE && ./clean_build_skipgnss.sh"
+gh codespace ssh -c "$CODESPACE_NAME" -- "cd $REMOTE_WORKSPACE && git pull && ./clean_build_skipgnss.sh"
 
 echo "==> Downloading binaries to $LOCAL_BUILD_DIR..."
 mkdir -p "$LOCAL_BUILD_DIR"
