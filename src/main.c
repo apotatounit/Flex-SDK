@@ -434,11 +434,20 @@ static time_t RunModbusDiagnostic(void)
       printf(">>> RECONNECT sensor NOW (plug cable). Power on in 3s...\r\n");
       FLEX_DelayMs(3000);
       FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
-      FLEX_DelayMs(100);
-      if (TryOneModbusRead(&t))
-        printf("  Cycle %d: read FAIL after 100ms settle\r\n", cycle + 1);
-      else
-        printf("  Cycle %d: read OK %.1f °C\r\n", cycle + 1, (double)t);
+      /* Don't interpret 0.0 °C as OK – retry with incrementing delays: try at 100, 200, ..., 500 ms */
+      int cycle_ok = 0;
+      for (unsigned int attempt = 0; attempt < 5 && !cycle_ok; attempt++)
+      {
+        FLEX_DelayMs(100);  /* +100 ms each attempt: 100, 200, 300, 400, 500 ms from power-on */
+        unsigned int total_ms = 100 * (attempt + 1);
+        if (TryOneModbusRead(&t) == 0 && t != 0.0f && !isnan(t))
+        {
+          printf("  Cycle %d: read OK %.1f °C (after %u ms settle)\r\n", cycle + 1, (double)t, total_ms);
+          cycle_ok = 1;
+        }
+      }
+      if (!cycle_ok)
+        printf("  Cycle %d: read FAIL (0.0 or timeout after tries up to 500ms)\r\n", cycle + 1);
     }
     Modbus_Deinit();
     bInitModbusRequired = true;
@@ -457,11 +466,18 @@ static time_t RunModbusDiagnostic(void)
     printf(">>> RECONNECT sensor NOW. Power on in 3s...\r\n");
     FLEX_DelayMs(3000);
     FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
-    FLEX_DelayMs(200);
-    t0 = FLEX_TickGet();
-    int r = TryOneModbusRead(&t);
-    t1 = FLEX_TickGet();
-    printf("Read: %s, %.1f °C, duration %lu ticks\r\n", r ? "FAIL" : "OK", (double)t, (unsigned long)(t1 - t0));
+    /* Retry with incrementing delays (100, 200, ..., 500 ms); don't treat 0.0 °C as OK */
+    int r = -1;
+    for (unsigned int attempt = 0; attempt < 5; attempt++)
+    {
+      FLEX_DelayMs(100);
+      t0 = FLEX_TickGet();
+      r = TryOneModbusRead(&t);
+      t1 = FLEX_TickGet();
+      if (r == 0 && t != 0.0f && !isnan(t))
+        break;
+    }
+    printf("Read: %s, %.1f °C, duration %lu ticks\r\n", (r != 0 || t == 0.0f) ? "FAIL" : "OK", (double)t, (unsigned long)(t1 - t0));
     Modbus_Deinit();
     bInitModbusRequired = true;
     FLEX_PowerOutDeinit();
@@ -491,12 +507,12 @@ static time_t RunModbusDiagnostic(void)
       FLEX_DelayMs(500);
       FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
       FLEX_DelayMs(settle_ms);
-      if (!TryOneModbusRead(&t))
+      if (TryOneModbusRead(&t) == 0 && t != 0.0f && !isnan(t))
       {
         printf("Min settle: %u ms -> read OK %.1f °C\r\n", settle_ms, (double)t);
         break;
       }
-      printf("  settle %u ms: fail\r\n", settle_ms);
+      printf("  settle %u ms: fail (0.0 or timeout)\r\n", settle_ms);
     }
     Modbus_Deinit();
     bInitModbusRequired = true;
@@ -527,7 +543,7 @@ static time_t RunModbusDiagnostic(void)
       }
       bInitModbusRequired = false;
       FLEX_DelayMs(settle_ms);
-      if (!TryOneModbusRead(&t))
+      if (TryOneModbusRead(&t) == 0 && t != 0.0f && !isnan(t))
       {
         printf("Min settle (reinit): %u ms -> read OK %.1f °C\r\n", settle_ms, (double)t);
         Modbus_Deinit();
@@ -535,7 +551,7 @@ static time_t RunModbusDiagnostic(void)
         FLEX_PowerOutDeinit();
         break;
       }
-      printf("  settle %u ms: fail\r\n", settle_ms);
+      printf("  settle %u ms: fail (0.0 or timeout)\r\n", settle_ms);
       Modbus_Deinit();
       bInitModbusRequired = true;
       FLEX_PowerOutDeinit();
