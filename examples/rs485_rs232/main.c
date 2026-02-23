@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// An example running on Myriota's "FlexSense" board.
 // This example demonstrates RS-485/RS-232 interface communication between
 // an external device and the FlexSense Device.
 // This also demonstrates a basic modem application.
@@ -37,6 +38,7 @@ const FLEX_DigitalIOPin WakeupPin = FLEX_EXT_DIGITAL_IO_1;
 
 #define USING_RS232 0
 #define USING_RS485 1
+#define RX_BUFFER_MAX 20
 
 #if SERIAL_INTERFACE == USING_RS485
 #define SERIAL_PROTOCOL FLEX_SERIAL_PROTOCOL_RS485
@@ -75,8 +77,8 @@ static void Comm() {
   }
   FLEX_SerialWrite((uint8_t *)READY_STRING, strlen(READY_STRING));
 
-  uint8_t Rx[FLEX_MAX_MESSAGE_SIZE] = {0};
-  int len = ReadStringWithTimeout(Rx, FLEX_MAX_MESSAGE_SIZE);
+  uint8_t Rx[RX_BUFFER_MAX] = {0};
+  int len = ReadStringWithTimeout(Rx, RX_BUFFER_MAX);
   if (len <= 0) {
     printf("Failed to receive message\n");
   } else {

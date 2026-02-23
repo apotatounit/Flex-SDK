@@ -15,7 +15,17 @@
 #include "flex.h"
 
 static const bool flex_option_skip_gnss = @skip_gnss@;
+static const bool flex_option_disable_ble_adv = @disable_ble_adv@;
+static const char *flex_sdk_version = "@flex_sdk_version@";
 
 bool FLEX_GNSSSkipped(void) {
-    return flex_option_skip_gnss;
+  return flex_option_skip_gnss;
+}
+
+bool FLEX_BLEAdvDisabled(void) {
+  return flex_option_disable_ble_adv;
+}
+
+const char *FLEX_SDKVersion(void) {
+  return flex_sdk_version;
 }

@@ -21,6 +21,7 @@
 
 #define APPLICATION_NAME "Pulse Counter Example"
 
+// Number of pulses that will cause a wakeup event.
 #define PULSE_WAKEUP_COUNT 6
 
 static void RunsOnPulseCounterEvent() {
@@ -32,7 +33,7 @@ static void RunsOnPulseCounterEvent() {
 void FLEX_AppInit() {
   printf("%s\n", APPLICATION_NAME);
 
-  // Initialise to generate event every N pulses
+  // Initialise to generate event every PULSE_WAKEUP_COUNT pulses
   if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS)) {
     printf("Failed to initialise pulse counter\n");
   }
