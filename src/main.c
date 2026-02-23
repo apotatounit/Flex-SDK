@@ -404,8 +404,15 @@ static time_t RunModbusDiagnostic(void)
   float t;
   uint32_t t0, t1;
 
-  /* Test 1: Power cycle sensor without re-initing Modbus */
+  printf("\r\n");
+  printf("========================================\r\n");
+  printf("MODBUS DIAGNOSTIC – follow CONNECT/DISCONNECT prompts\r\n");
+  printf("========================================\r\n");
+
+  /* Test 1: Power cycle, Modbus stays init. Tests: reconnect before power-on. */
   printf("\r\n=== Test 1: Power cycle sensor, Modbus stays init ===\r\n");
+  printf(">>> CONNECT sensor (cable plugged, will be powered by board)\r\n");
+  FLEX_DelayMs(3000);
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
     printf("PowerOutInit failed\r\n");
   else if (Modbus_Init() != 0)
@@ -420,8 +427,12 @@ static time_t RunModbusDiagnostic(void)
       printf("Initial read OK: %.1f °C\r\n", (double)t);
     for (int cycle = 0; cycle < 3; cycle++)
     {
+      printf(">>> DISCONNECT sensor NOW (unplug cable). Power off in 5s...\r\n");
+      FLEX_DelayMs(5000);
       FLEX_PowerOutDeinit();
       FLEX_DelayMs(2000);
+      printf(">>> RECONNECT sensor NOW (plug cable). Power on in 3s...\r\n");
+      FLEX_DelayMs(3000);
       FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
       FLEX_DelayMs(100);
       if (TryOneModbusRead(&t))
@@ -434,13 +445,17 @@ static time_t RunModbusDiagnostic(void)
     FLEX_PowerOutDeinit();
   }
 
-  /* Test 2: Init Modbus with sensor unpowered, then power up and read */
-  printf("\r\n=== Test 2: Init Modbus without sensor powered ===\r\n");
+  /* Test 2: Init Modbus with sensor unpowered. Correct order for cold start. */
+  printf("\r\n=== Test 2: Init Modbus WITHOUT sensor powered (then power + read) ===\r\n");
+  printf(">>> DISCONNECT sensor OR leave unpowered. Modbus init in 3s...\r\n");
+  FLEX_DelayMs(3000);
   if (Modbus_Init() != 0)
     printf("Modbus_Init (sensor off) failed\r\n");
   else
   {
     bInitModbusRequired = false;
+    printf(">>> RECONNECT sensor NOW. Power on in 3s...\r\n");
+    FLEX_DelayMs(3000);
     FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
     FLEX_DelayMs(200);
     t0 = FLEX_TickGet();
@@ -452,8 +467,10 @@ static time_t RunModbusDiagnostic(void)
     FLEX_PowerOutDeinit();
   }
 
-  /* Test 3: Min settle time (sensor power up, Modbus already init) */
-  printf("\r\n=== Test 3: Min settle (Modbus already init) ===\r\n");
+  /* Test 3: Min settle time – sensor power up, Modbus already init. */
+  printf("\r\n=== Test 3: Min settle calibration (Modbus already init) ===\r\n");
+  printf(">>> CONNECT sensor. We power on, then power-cycle and try 0,25,50...ms settle.\r\n");
+  FLEX_DelayMs(3000);
   FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
   if (Modbus_Init() != 0)
   {
@@ -469,6 +486,7 @@ static time_t RunModbusDiagnostic(void)
     for (size_t i = 0; i < sizeof(settle_list) / sizeof(settle_list[0]); i++)
     {
       unsigned int settle_ms = settle_list[i];
+      printf("  Power off 500ms, power on, wait %u ms...\r\n", settle_ms);
       FLEX_PowerOutDeinit();
       FLEX_DelayMs(500);
       FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
@@ -485,8 +503,10 @@ static time_t RunModbusDiagnostic(void)
     FLEX_PowerOutDeinit();
   }
 
-  /* Test 4: Min settle with Modbus reinit each power cycle */
-  printf("\r\n=== Test 4: Min settle with Modbus reinit each cycle ===\r\n");
+  /* Test 4: Min settle with Modbus reinit each power cycle. */
+  printf("\r\n=== Test 4: Min settle with Modbus REINIT each cycle ===\r\n");
+  printf(">>> CONNECT sensor. Each trial: power off, Modbus deinit, power on, Modbus init, settle, read.\r\n");
+  FLEX_DelayMs(3000);
   {
     static const unsigned int settle_list[] = {0, 25, 50, 75, 100, 150, 200, 300, 500};
     for (size_t i = 0; i < sizeof(settle_list) / sizeof(settle_list[0]); i++)
@@ -522,8 +542,10 @@ static time_t RunModbusDiagnostic(void)
     }
   }
 
-  /* Test 5: Max sampling rate – read duration and variable interval */
+  /* Test 5: Max sampling rate */
   printf("\r\n=== Test 5: Max sampling rate ===\r\n");
+  printf(">>> CONNECT sensor (if not already).\r\n");
+  FLEX_DelayMs(2000);
   FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
   if (Modbus_Init() != 0)
   {
@@ -562,7 +584,33 @@ static time_t RunModbusDiagnostic(void)
     FLEX_PowerOutDeinit();
   }
 
-  printf("\r\n=== Modbus diagnostics done ===\r\n");
+  /* Test 6: Sleep/wake with sensor DISCONNECTED (reproduces FlexSense sleep/wake issue) */
+  printf("\r\n=== Test 6: Sleep/wake with sensor DISCONNECTED ===\r\n");
+  printf("Simulates: measure -> deinit (sleep) with sensor unplugged -> next wake init -> read.\r\n");
+  printf(">>> CONNECT sensor. We do one read, then you DISCONNECT before deinit.\r\n");
+  FLEX_DelayMs(3000);
+  FLEX_PowerOutInit(SENSOR_POWER_SUPPLY);
+  if (Modbus_Init() != 0)
+    printf("Modbus_Init failed\r\n");
+  else
+  {
+    bInitModbusRequired = false;
+    FLEX_DelayMs(200);
+    if (TryOneModbusRead(&t))
+      printf("Read before deinit: FAIL\r\n");
+    else
+      printf("Read before deinit: OK %.1f °C\r\n", (double)t);
+    printf(">>> DISCONNECT sensor NOW. Deinit in 5s (simulating sleep)...\r\n");
+    FLEX_DelayMs(5000);
+    printf("Modbus_Deinit: disabling...\r\n");
+    Modbus_Deinit();
+    bInitModbusRequired = true;
+    printf("Modbus_Deinit: done. Power off.\r\n");
+    FLEX_PowerOutDeinit();
+    printf(">>> RECONNECT sensor NOW. Next run will Init and read (in ~30s or when job runs).\r\n");
+  }
+
+  printf("\r\n=== Modbus diagnostics done. Next: ScheduleNextRun (full init + collect). ===\r\n");
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
   return next_run_time;
 }

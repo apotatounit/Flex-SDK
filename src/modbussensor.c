@@ -136,9 +136,10 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
     }
     printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
 
+    /* Skip 00 00 only on first attempt (sensor may not be ready yet); on retry accept as valid 0.0 °C */
     if (retries == 0 && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
     {
-      printf("Skipping first zero result\n");
+      printf("Skipping first zero result (retry for 0 °C or not ready)\n");
       result = MODBUS_ERROR_IO_FAILURE;
       continue;
     }
