@@ -141,6 +141,15 @@ build in a Codespace and pull the binaries locally using the GitHub CLI:
    Set `CODESPACE_NAME` if you have multiple codespaces; set `REMOTE_WORKSPACE` if
    your repo is not at `/workspaces/Flex-SDK` in the container.
 
+4. To upload the binary to your FlexSense device (with the device connected via USB):
+
+   ```shell
+   pip3 install -r requirements.txt   # once, if not already installed)
+   ./scripts/updater.py -m ./build/user_application.bin
+   ```
+
+   On macOS with an externally managed Python, use a venv: `python3 -m venv .venv`, `source .venv/bin/activate`, then `pip install -r requirements.txt` and run the updater.
+
 ### Downloading libflex and system_image binaries
 
 > [!IMPORTANT]

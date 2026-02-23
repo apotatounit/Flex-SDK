@@ -9,21 +9,25 @@
 # Usage:
 #   ./build-via-codespace.sh              # build in Codespace, download to ./build/
 #   ./build-via-codespace.sh --push        # git add, commit, push, then build
-#   CODESPACE_NAME=my-codespace ./build-via-codespace.sh
+#   ./build-via-codespace.sh --upload      # after download, upload to device (set UPDATER_PORT if needed)
+#   UPDATER_PORT=/dev/cu.usbmodem1101 ./build-via-codespace.sh --upload
 #
 set -euo pipefail
 
 REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-/workspaces/Flex-SDK}"
 LOCAL_BUILD_DIR="${LOCAL_BUILD_DIR:-./build}"
 PUSH=
+UPLOAD=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --push)   PUSH=1; shift ;;
+    --upload) UPLOAD=1; shift ;;
     -h|--help)
-      echo "Usage: $0 [--push]"
+      echo "Usage: $0 [--push] [--upload]"
       echo "  --push   Commit all changes, push, then build in Codespace and download binaries."
-      echo "  Env:     CODESPACE_NAME, REMOTE_WORKSPACE, LOCAL_BUILD_DIR"
+      echo "  --upload After download, run updater to flash device (requires UPDATER_PORT if not default)."
+      echo "  Env:     CODESPACE_NAME, REMOTE_WORKSPACE, LOCAL_BUILD_DIR, UPDATER_PORT"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -80,8 +84,33 @@ gh codespace ssh -c "$CODESPACE_NAME" -- "cd $REMOTE_WORKSPACE && ./clean_build_
 
 echo "==> Downloading binaries to $LOCAL_BUILD_DIR..."
 mkdir -p "$LOCAL_BUILD_DIR"
-gh codespace cp -c "$CODESPACE_NAME" "remote:$REMOTE_WORKSPACE/build/user_application.bin" "$LOCAL_BUILD_DIR/"
-gh codespace cp -c "$CODESPACE_NAME" "remote:$REMOTE_WORKSPACE/build/user_application.nonetwork.bin" "$LOCAL_BUILD_DIR/" 2>/dev/null || true
+# Discover build dir on remote (workspace path can differ from /workspaces/Flex-SDK)
+REMOTE_BUILD_BIN=$(gh codespace ssh -c "$CODESPACE_NAME" -- "find /workspaces -name 'user_application.bin' -type f 2>/dev/null | head -1" | tr -d '\r\n')
+if [[ -z "$REMOTE_BUILD_BIN" ]]; then
+  echo "Error: could not find user_application.bin on remote. Using default path."
+  REMOTE_BUILD_BIN="$REMOTE_WORKSPACE/build/user_application.bin"
+  REMOTE_BUILD_DIR="$REMOTE_WORKSPACE/build"
+else
+  REMOTE_BUILD_DIR="${REMOTE_BUILD_BIN%/*}"
+fi
+# -e expands remote path on the server (needed for absolute paths like /workspaces/...)
+gh codespace cp -e -c "$CODESPACE_NAME" "remote:$REMOTE_BUILD_BIN" "$LOCAL_BUILD_DIR/"
+gh codespace cp -e -c "$CODESPACE_NAME" "remote:$REMOTE_BUILD_DIR/user_application.nonetwork.bin" "$LOCAL_BUILD_DIR/" 2>/dev/null || true
 
 echo "==> Done. Binaries in $LOCAL_BUILD_DIR:"
 ls -la "$LOCAL_BUILD_DIR"/user_application*.bin 2>/dev/null || true
+
+if [[ -n "${UPLOAD:-}" ]]; then
+  if ! python3 -c "import serial" 2>/dev/null; then
+    echo "==> Upload skipped: pyserial not installed. Activate venv or: pip install -r requirements.txt"
+    exit 0
+  fi
+  UPDATER_PORT="${UPDATER_PORT:-}"
+  if [[ -z "$UPDATER_PORT" ]]; then
+    echo "==> Uploading to device (auto-detect port)..."
+    ./scripts/updater.py -m "$LOCAL_BUILD_DIR/user_application.bin"
+  else
+    echo "==> Uploading to device on $UPDATER_PORT..."
+    ./scripts/updater.py -m "$LOCAL_BUILD_DIR/user_application.bin" -p "$UPDATER_PORT"
+  fi
+fi
