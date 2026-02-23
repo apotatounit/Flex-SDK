@@ -71,6 +71,7 @@ static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
 static void BlinkLed(int count);
 static uint16_t GetPulseRate(void);
+static time_t ScheduleNextRun(void);
 
 // Arrays to store sensor readings
 // static float temperature_readings[SENSOR_READINGS_COUNT];
