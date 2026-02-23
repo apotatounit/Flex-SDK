@@ -19,11 +19,6 @@
 #define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
 #define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
 
-static uint32_t GetTickMs(void)
-{
-  return FLEX_TickGet();
-}
-
 static void PowerOn(void)
 {
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
