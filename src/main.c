@@ -1,472 +1,649 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
 #include "flex.h"
-#include <time.h>
 #include "modbussensor.h"
 
-#define APPLICATION_NAME "Sensor Pipeline Logger"
+#define APPLICATION_NAME "Sensor Timing Calibration"
+
+// Test enable/disable configuration
+#define ENABLE_PULSE_TEST 1
+#define ENABLE_ANALOG_TEST 1
+#define ENABLE_MODBUS_TEST 1
+
+// Test range configuration
+#define PULSE_POWERUP_DELAY_MIN_MS 0
+#define PULSE_POWERUP_DELAY_MAX_MS 5000
+#define PULSE_POWERUP_DELAY_STEP_MS 100
+
+#define PULSE_READ_DELAY_MIN_MS 10
+#define PULSE_READ_DELAY_MAX_MS 1000
+#define PULSE_READ_DELAY_STEP_MS 50
+
+#define ANALOG_POWERUP_DELAY_MIN_MS 0
+#define ANALOG_POWERUP_DELAY_MAX_MS 5000
+#define ANALOG_POWERUP_DELAY_STEP_MS 100
+
+#define ANALOG_READ_DELAY_MIN_MS 1
+#define ANALOG_READ_DELAY_MAX_MS 500
+#define ANALOG_READ_DELAY_STEP_MS 10
+
+#define MODBUS_POWERUP_DELAY_MIN_MS 0
+#define MODBUS_POWERUP_DELAY_MAX_MS 10000
+#define MODBUS_POWERUP_DELAY_STEP_MS 200
+
+#define MODBUS_READ_DELAY_MIN_MS 10
+#define MODBUS_READ_DELAY_MAX_MS 2000
+#define MODBUS_READ_DELAY_STEP_MS 50
+
+// Test parameters
+#define PULSE_COUNT_WINDOW_MS 1000
+#define PULSE_READ_WINDOW_MS 100
+#define PULSE_READ_ITERATIONS 10
+#define ANALOG_READ_COUNT_POWERUP 10
+#define ANALOG_READ_COUNT_FREQ 100
+#define MODBUS_READ_RETRIES 3
+#define MODBUS_READ_ITERATIONS 20
+
+// Validation thresholds
+#define ANALOG_STD_DEV_THRESHOLD_MV 10
+#define ANALOG_ALIVE_VOLTAGE_V 1.0
+#define ANALOG_ALIVE_TOLERANCE_V 0.2
+#define MODBUS_SUCCESS_RATE_THRESHOLD 95
+#define INTER_CYCLE_DELAY_MS 5000
 
 // Sensor configuration
 #define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
 #define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
 #define PULSE_WAKEUP_COUNT 0
 
-#define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
-#define SENSOR_STABILISE_DELAY_MS 5000
-// #define DATA_COLLECTION_DURATION_SEC 10
-#define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT 5
-
-#define INTERVAL_WAKEUP_DEFAULT 30       // 30 seconds
-#define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
-// #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
-
-#define ENABLE_TRANSMIT 1
-#define ENABLE_MODBUS 1
-bool bInitModbusRequired = true; // only required on first init after power supply init
-#define LED_BLINK_DELAY 200      // ms
-
 typedef struct
 {
-  int16_t temperature;
-  uint16_t analog_in;
-  uint16_t pulse_per_minute;
-  uint8_t ret_temp;
-  uint8_t ret_ain;
-  uint8_t ret_ppm;
-  uint8_t ret_flexsense;
-} SensorMeasurements;
-
-typedef struct
-{
-  uint8_t sequence_number;
-  uint32_t time;
-  // int32_t latitude;
-  // int32_t longitude;
-  int16_t temperature;
-  uint16_t analog_in;
-  uint16_t pulse_per_minute;
-  uint8_t error_code;
-} __attribute__((packed)) Message;
-
-typedef enum
-{
-  SENSOR_ERROR_NONE = 0x00, // No error
-  SENSOR_ERROR_TEMP = 0x01, // Temperature sensor error
-  SENSOR_ERROR_AIN = 0x02   // Analog input sensor error
-} SensorError;
-
-typedef struct
-{
-  int16_t return_code;
+  uint32_t timestamp_ms;
+  uint32_t powerup_delay_ms;
+  uint32_t read_delay_ms;
+  bool sensor_alive;
+  bool success;
   float value;
-} ReadResult;
-
-_Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max message size");
-
-static Message MakeMessage(SensorMeasurements measurements);
-static int send_message(Message message);
-static void BlinkLed(int count);
-static uint16_t GetPulseRate(void);
-
-// Arrays to store sensor readings
-// static float temperature_readings[SENSOR_READINGS_COUNT];
-// static float pressure_readings[SENSOR_READINGS_COUNT];
-// static uint32_t flow_meter_pulse_count = 0;
-
-// Simulated functions for temperature, pressure, and flow meter
-static ReadResult ReadTemperatureSensor(void)
-{
-  // Replace with actual temperature sensor reading logic
-  float temperature; // Simulated temperature reading
-  int result = 0;
-  if (ENABLE_MODBUS)
-  {
-    result = Modbus_Request_Receive_Temperature(&temperature);
-  }
-  else
-  {
-    // Simulate a successful read
-    temperature = 25.0; // Simulated temperature reading
-    result = 0;
-  }
-  // Modbus_Request_Receive_Temperature(&temperature);
-  if (result)
-  {
-    printf("Failed to Read Temperature from Modbus sensor.\r\n");
-  }
-  ReadResult read_result = {result, temperature};
-  return read_result;
-}
-
-static ReadResult ReadPressureSensor(void)
-{
-  uint32_t SensorReading = UINT32_MAX;
-  ReadResult read_result = {0, 0};
-
-  int ret = FLEX_AnalogInputReadVoltage(&SensorReading);
-  if (ret != 0)
-  {
-    printf("Failed to Read Voltage.\r\n");
-    read_result.return_code = ret;
-  }
-  else
-  {
-    read_result.value = SensorReading / 1000.0; // Convert from mV to V
-    read_result.return_code = 0;
-    // printf("Analog Input Voltage: %.3f V\r\n", read_result.value);
-  }
-
-  return read_result;
-}
-
-uint32_t pulse_count_start_tick;
-uint32_t pulse_count_end_tick;
-
-static void StartFlowMeterTimer(void)
-{
-  // Initialise to generate event every N pulses
-  if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS))
-  {
-    printf("Failed to initialise pulse counter\n");
-  }
-  else
-  {
-    printf("Pulse counter initialised.\r\n");
-  }
-  // Start counting pulses from the flow meter
-  pulse_count_start_tick = FLEX_TickGet(); // Use FLEX SDK function to get start tick
-  printf("Pulse counting started at tick: %ld\r\n", pulse_count_start_tick);
-}
+  uint32_t duration_ms;
+} MeasurementResult;
 
 typedef struct
 {
-  uint32_t pulse_count;
-  uint32_t elapsed_time_ms;
-} FlowMeterData;
+  float mean;
+  float median;
+  float std_dev;
+  float min;
+  float max;
+  uint32_t count;
+} Statistics;
 
-static FlowMeterData StopFlowMeterPulseCounting(void)
+static uint32_t GetTickMs(void)
 {
-  uint32_t flow_meter_pulse_count = (uint32_t)FLEX_PulseCounterGet();
-
-  // Replace with actual logic to stop counting and return pulse count and elapsed time
-  pulse_count_end_tick = FLEX_TickGet(); // Use FLEX SDK function to get end tick
-  uint32_t elapsed_time_ms = pulse_count_end_tick - pulse_count_start_tick;
-  printf("Elapsed Time for Pulse Counting: %u milliseconds\r\n", (uint16_t)elapsed_time_ms);
-
-  FLEX_PulseCounterDeinit(); // Deinitialise the pulse counter
-  printf("Pulse counter deinitialised.\r\n");
-
-  FlowMeterData data = {flow_meter_pulse_count, elapsed_time_ms};
-  return data;
+  return FLEX_TickGet();
 }
 
-static uint16_t GetPulseRate(void)
+static void PowerOn(void)
 {
-  // Replace with actual logic to get current pulse rate
-  uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
-  uint16_t pulse_rate = (uint16_t)(1000.0 / (FLEX_TickGet() - pulse_count_start_tick) * pulse_count); // pulses per second
-  return pulse_rate;
-}
-
-static SensorMeasurements CollectSensorData(void)
-{
-  // Calculate averages
-  float temperature_sum = 0.0, pressure_sum = 0.0;
-  unsigned int sum_counter_pres = 0;
-  unsigned int sum_counter_temp = 0;
-  int16_t err_temp = 0;
-  int16_t err_ain = 0;
-  // int16_t err_pulse = 0;
-  // Collect temperature and pressure readings
-  for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
-  {
-    printf("Collecting sensor data...\r\n");
-    uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
-    uint16_t pulse_rate = GetPulseRate();
-    ReadResult temperature_result = ReadTemperatureSensor();
-    ReadResult pressure_result = ReadPressureSensor();
-
-    if (temperature_result.return_code)
-    {
-      printf("Error reading temperature sensor\r\n");
-      err_temp = temperature_result.return_code;
-    }
-    else
-    {
-      sum_counter_temp++;
-      temperature_sum += temperature_result.value;
-      err_temp = 0;
-    }
-
-    if (pressure_result.return_code)
-    {
-      printf("Error reading pressure sensor\r\n");
-      err_ain = pressure_result.return_code;
-    }
-    else
-    {
-      sum_counter_pres++;
-      pressure_sum += pressure_result.value;
-      err_ain = 0;
-    }
-
-    if (pressure_result.return_code || temperature_result.return_code)
-    {
-      BlinkLed(3);
-    }
-    else
-    {
-      BlinkLed(1);
-    }
-
-    float temperature = temperature_result.value;
-    float pressure = pressure_result.value;
-
-    printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
-
-    if (DATA_COLLECTION_INTERVAL_MS > 2 * LED_BLINK_DELAY)
-    {
-      FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS - 2 * LED_BLINK_DELAY);
-    }
-  }
-
-  float avg_temperature = sum_counter_temp ? temperature_sum / sum_counter_temp : 0;
-  float avg_pressure_ain = sum_counter_pres ? pressure_sum / sum_counter_pres : 0;
-
-  // Map avg_pressure_ain from 0.5-4.5 volts to 0-5 bar
-  float avg_pressure;
-  if (avg_pressure_ain < 0.3 || avg_pressure_ain > 5)
-  {
-    printf("reading out of range (%.2fV)\r\n", avg_pressure_ain);
-    avg_pressure = -1; // Indicate an error
-  }
-  else
-  {
-    float calib_ain = 0.05;                                                    // Calibration value
-    avg_pressure = (avg_pressure_ain - calib_ain - 0.5) * (5.0 / (4.5 - 0.5)); // Linear mapping
-  }
-
-  // Stop flow meter pulse counting
-  FlowMeterData flow_data = StopFlowMeterPulseCounting();
-  if (flow_data.pulse_count)
-  {
-    flow_data.pulse_count -= 1; // Adjust for the initial pulse
-  }
-
-  // Calculate flow rate (pulses per minute)
-  uint32_t pulses_per_minute = (uint32_t)(flow_data.pulse_count * (60000.0 / flow_data.elapsed_time_ms));
-
-  // Print results
-  printf("Average Temperature: %.1f °C\r\n", avg_temperature);
-  printf("Average AIN: %.3f V\r\n", avg_pressure_ain);
-  printf("Average Pressure: %.3f bar\r\n", avg_pressure);
-  printf("Pulse Rate: %.2ld pulses/min\r\n", pulses_per_minute);
-
-  SensorMeasurements measurements = {0};
-  measurements.temperature = (int16_t)(avg_temperature * 10 + 0.5); // Round to nearest 0.1 and convert to tenths of degrees
-  measurements.analog_in = (uint16_t)(avg_pressure_ain * 1000);     // Convert to millivolts
-  measurements.pulse_per_minute = (uint16_t)pulses_per_minute;
-  measurements.ret_temp = (uint8_t)err_temp;
-  measurements.ret_ain = (uint8_t)err_ain;
-
-  // TODO assign ret_temp - error code for sensor interfacing
-  return measurements;
-}
-
-static int InitDevice(void)
-{
-  // if (ENABLE_MODBUS && Modbus_Init() != 0)
-  // {
-  //   printf("Failed to Init Modbus.\r\n");
-  //   return -1;
-  // }
-  return 0;
-}
-
-static int InitSensors(void)
-{
-  printf("Initialising sensors...\r\n");
-  // Enable power supply to sensors
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
-    printf("Failed to enable sensor power supply.\r\n");
-    return -1;
+    printf("ERROR: Failed to enable sensor power supply.\r\n");
   }
-  else
-  {
-    printf("Sensor power supply enabled.\r\n");
-  }
-  // Initialise the analog input
-
-  if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
-  {
-    printf("Failed to Init Analog Input.\r\n");
-    return -1;
-  }
-  else
-  {
-    printf("Analog Input initialised.\r\n");
-  }
-
-  if (ENABLE_MODBUS && bInitModbusRequired && Modbus_Init() != 0)
-  {
-    printf("Failed to Init Modbus.\r\n");
-    // return -1;
-  }
-  else
-  {
-    bInitModbusRequired = false;
-    printf("Modbus initialised.\r\n");
-  }
-
-  FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
-
-  StartFlowMeterTimer();
-
-  // Wait for sensors to stabilize
-  FLEX_DelayMs(SENSOR_STABILISE_DELAY_MS);
-  return 0;
 }
 
-static void DeinitSensors(void)
+static void PowerOff(void)
 {
-  // Deinit sensors
-  FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
-  FLEX_PulseCounterDeinit();
-  // Modbus_Deinit();
 }
 
-// function to blink LED n times, defined by argument
-static void BlinkLed(int count)
+// Pulse Interrupt Sensor Tests
+#if ENABLE_PULSE_TEST
+
+static bool IsPulseSensorAlive(uint32_t pulse_count, float *rates, uint32_t rate_count)
 {
-  bool inverse = false;
-  for (int i = 0; i < count; i++)
+  if (pulse_count <= 1)
+    return false;
+
+  if (rate_count < 2)
+    return true; // Need at least 2 readings to check stability
+
+  // Check if rates are relatively stable (variation < 20%)
+  float avg_rate = 0;
+  for (uint32_t i = 0; i < rate_count; i++)
   {
-    if (inverse)
-    {
-      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      // printf("Green LED Off\n");
-    }
-    else
-    {
-      FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      // printf("Green LED On\n");
-    }
-    FLEX_DelayMs(LED_BLINK_DELAY);
-    if (inverse)
-    {
-      FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      // printf("Green LED On\n");
-    }
-    else
-    {
-      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      // printf("Green LED Off\n");
-    }
-    FLEX_DelayMs(LED_BLINK_DELAY);
+    avg_rate += rates[i];
   }
+  avg_rate /= rate_count;
+
+  float max_deviation = 0;
+  for (uint32_t i = 0; i < rate_count; i++)
+  {
+    float deviation = fabsf(rates[i] - avg_rate) / avg_rate;
+    if (deviation > max_deviation)
+      max_deviation = deviation;
+  }
+
+  return max_deviation < 0.2; // 20% tolerance
 }
 
-static time_t ScheduleNextRun(void)
+static uint32_t TestPulsePowerUpDelay(void)
 {
-  // Schedule next run in 1 hour since wakeup time
-  time_t wakeup_time = FLEX_TimeGet();
-  time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_DEFAULT;
+  printf("\r\n=== Pulse Sensor: Power-Up Delay Test ===\r\n");
+  printf("Sweep: %u-%u ms, step: %u ms\r\n", 
+         PULSE_POWERUP_DELAY_MIN_MS, PULSE_POWERUP_DELAY_MAX_MS, PULSE_POWERUP_DELAY_STEP_MS);
 
-  // FLEX_LEDGreenStateSet(FLEX_LED_ON);
-  // printf("Green LED On\n");
-  BlinkLed(5);
+  uint32_t min_reliable_delay = UINT32_MAX;
 
-  // Init sensors
-  if (InitSensors())
+  for (uint32_t delay = PULSE_POWERUP_DELAY_MIN_MS; delay <= PULSE_POWERUP_DELAY_MAX_MS; delay += PULSE_POWERUP_DELAY_STEP_MS)
   {
-    printf("Failed Init Sensors\n");
+    PowerOn();
+    FLEX_DelayMs(delay);
+
+    uint32_t start_tick = GetTickMs();
+    if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS) != 0)
+    {
+      printf("ERROR: Failed to init pulse counter\r\n");
+      PowerOff();
+      continue;
+    }
+
+    FLEX_DelayMs(PULSE_COUNT_WINDOW_MS);
+    uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
+    uint32_t end_tick = GetTickMs();
+    uint32_t duration_ms = end_tick - start_tick;
+
+    FLEX_PulseCounterDeinit();
+    PowerOff();
+
+    float rate = (pulse_count > 0) ? (pulse_count * 60000.0f / duration_ms) : 0;
+    bool alive = IsPulseSensorAlive(pulse_count, &rate, 1);
+
+    printf("PULSE_POWERUP: ts=%lu, delay=%lu, count=%lu, duration=%lu, rate=%.1f, alive=%s\r\n",
+           GetTickMs(), delay, pulse_count, duration_ms, rate, alive ? "yes" : "no");
+
+    if (alive && delay < min_reliable_delay)
+    {
+      min_reliable_delay = delay;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  if (min_reliable_delay != UINT32_MAX)
+  {
+    printf("RESULT: Minimum reliable power-up delay = %lu ms\r\n", min_reliable_delay);
   }
   else
   {
-    printf("Sensors initialised\r\n");
-    SensorMeasurements measurements = CollectSensorData();
-    printf("Sensor data collected\r\n");
-    if (ENABLE_TRANSMIT)
+    printf("RESULT: No reliable delay found in range\r\n");
+  }
+}
+
+static void TestPulseReadingFrequency(uint32_t min_powerup_delay)
+{
+  printf("\r\n=== Pulse Sensor: Reading Frequency Test ===\r\n");
+  printf("Using power-up delay: %lu ms\r\n", min_powerup_delay);
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         PULSE_READ_DELAY_MIN_MS, PULSE_READ_DELAY_MAX_MS, PULSE_READ_DELAY_STEP_MS);
+
+  uint32_t min_reliable_delay = UINT32_MAX;
+
+  for (uint32_t delay = PULSE_READ_DELAY_MIN_MS; delay <= PULSE_READ_DELAY_MAX_MS; delay += PULSE_READ_DELAY_STEP_MS)
+  {
+    PowerOn();
+    FLEX_DelayMs(min_powerup_delay);
+
+    float rates[PULSE_READ_ITERATIONS];
+    uint32_t counts[PULSE_READ_ITERATIONS];
+    bool all_success = true;
+
+    for (int i = 0; i < PULSE_READ_ITERATIONS; i++)
     {
-      printf("Making message...\r\n");
-      Message message = MakeMessage(measurements);
-      int ret = send_message(message);
-      printf("Message sent with result: %d\r\n", ret);
-      next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
-      BlinkLed(5);
+      if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS) != 0)
+      {
+        all_success = false;
+        break;
+      }
+
+      uint32_t start_tick = GetTickMs();
+      FLEX_DelayMs(PULSE_READ_WINDOW_MS);
+      counts[i] = (uint32_t)FLEX_PulseCounterGet();
+      uint32_t end_tick = GetTickMs();
+      uint32_t duration_ms = end_tick - start_tick;
+
+      rates[i] = (counts[i] > 0) ? (counts[i] * 60000.0f / duration_ms) : 0;
+      FLEX_PulseCounterDeinit();
+
+      if (delay > 0)
+        FLEX_DelayMs(delay);
+    }
+
+    PowerOff();
+
+    bool alive = all_success && IsPulseSensorAlive(0, rates, PULSE_READ_ITERATIONS);
+
+    float avg_count = 0;
+    for (int i = 0; i < PULSE_READ_ITERATIONS; i++)
+    {
+      avg_count += counts[i];
+    }
+    avg_count /= PULSE_READ_ITERATIONS;
+
+    printf("PULSE_FREQ: ts=%lu, delay=%lu, avg_count=%.1f, alive=%s\r\n",
+           GetTickMs(), delay, avg_count, alive ? "yes" : "no");
+
+    if (alive && delay < min_reliable_delay)
+    {
+      min_reliable_delay = delay;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  if (min_reliable_delay != UINT32_MAX)
+  {
+    printf("RESULT: Minimum reliable reading delay = %lu ms\r\n", min_reliable_delay);
+  }
+  else
+  {
+    printf("RESULT: No reliable delay found in range\r\n");
+  }
+}
+
+#endif // ENABLE_PULSE_TEST
+
+// Analog Input Sensor Tests
+#if ENABLE_ANALOG_TEST
+
+static void CalculateStatistics(float *values, uint32_t count, Statistics *stats)
+{
+  if (count == 0)
+  {
+    stats->mean = 0;
+    stats->median = 0;
+    stats->std_dev = 0;
+    stats->min = 0;
+    stats->max = 0;
+    stats->count = 0;
+    return;
+  }
+
+  // Calculate mean and min/max
+  float sum = 0;
+  stats->min = values[0];
+  stats->max = values[0];
+  for (uint32_t i = 0; i < count; i++)
+  {
+    sum += values[i];
+    if (values[i] < stats->min)
+      stats->min = values[i];
+    if (values[i] > stats->max)
+      stats->max = values[i];
+  }
+  stats->mean = sum / count;
+  stats->count = count;
+
+  // Calculate standard deviation
+  float variance = 0;
+  for (uint32_t i = 0; i < count; i++)
+  {
+    float diff = values[i] - stats->mean;
+    variance += diff * diff;
+  }
+  stats->std_dev = sqrtf(variance / count);
+
+  // Calculate median (simple sort for small arrays)
+  float sorted[ANALOG_READ_COUNT_FREQ];
+  for (uint32_t i = 0; i < count; i++)
+    sorted[i] = values[i];
+  // Simple bubble sort
+  for (uint32_t i = 0; i < count - 1; i++)
+  {
+    for (uint32_t j = 0; j < count - i - 1; j++)
+    {
+      if (sorted[j] > sorted[j + 1])
+      {
+        float temp = sorted[j];
+        sorted[j] = sorted[j + 1];
+        sorted[j + 1] = temp;
+      }
     }
   }
-  printf("Deinitialising sensors...\r\n");
-  DeinitSensors();
-
-  // FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-  printf("Next run in %ld seconds\r\n", (int32_t)(next_run_time - FLEX_TimeGet()));
-  return next_run_time;
+  stats->median = (count % 2 == 0) ? (sorted[count / 2 - 1] + sorted[count / 2]) / 2.0f : sorted[count / 2];
 }
 
-static Message MakeMessage(SensorMeasurements measurements)
+static bool IsAnalogStable(Statistics *stats)
 {
-  static uint8_t sequence_number = 0;
-
-  Message message = {0};
-  message.sequence_number = sequence_number++;
-  message.time = FLEX_TimeGet();
-  message.temperature = (int16_t)measurements.temperature;
-  message.analog_in = (uint16_t)measurements.analog_in;
-  message.pulse_per_minute = (uint16_t)measurements.pulse_per_minute;
-
-  if (measurements.ret_temp)
-  {
-    message.error_code |= SENSOR_ERROR_TEMP;
-  }
-  if (measurements.ret_ain)
-  {
-    message.error_code |= SENSOR_ERROR_AIN;
-  }
-
-  //   int32_t latitude = 0;
-  //   int32_t longitude = 0;
-  //   FLEX_LastLocationAndLastFixTime(&latitude, &longitude, NULL);
-  //   message.latitude = latitude;
-  //   message.longitude = longitude;
-
-  return message;
+  return (stats->std_dev * 1000.0f < ANALOG_STD_DEV_THRESHOLD_MV) &&
+         (stats->min >= 0.0f && stats->max <= 5.0f);
 }
 
-static int send_message(Message message)
+static bool IsAnalogAlive(Statistics *stats)
 {
-  //   FLEX_LastLocationAndLastFixTime(&latitude, &longitude, NULL);
-  //   message.latitude = latitude;
-  //   message.longitude = longitude;
-
-  //   int16_t temperature = 0;
-  //   int16_t humidity = 0;
-  //   read_temperature_and_humidity(&temperature, &humidity);
-  //   message.temperature = temperature;
-  //   message.humidity = humidity;
-
-  // Schedule messages for satellite transmission
-  int ret = FLEX_MessageSchedule((const uint8_t *const)&message, sizeof(message));
-  printf("Message scheduling returned: %d\n", ret);
-  printf("Scheduled message: \n");
-
-  printf("  Sequence Number: %u\n", message.sequence_number);
-  printf("  Timestamp: %lu\n", message.time);
-  printf("  Temperature: %d /10 °C\n", message.temperature);
-  printf("  Analog Input (Pressure): %u mV\n", message.analog_in);
-  printf("  Flow Rate (Pulses/Minute): %u\n", message.pulse_per_minute);
-
-  return ret;
+  float target = ANALOG_ALIVE_VOLTAGE_V;
+  float tolerance = ANALOG_ALIVE_TOLERANCE_V;
+  return (stats->mean >= target - tolerance) && (stats->mean <= target + tolerance);
 }
+
+static uint32_t TestAnalogPowerUpDelay(void)
+{
+  printf("\r\n=== Analog Input Sensor: Power-Up Delay Test ===\r\n");
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         ANALOG_POWERUP_DELAY_MIN_MS, ANALOG_POWERUP_DELAY_MAX_MS, ANALOG_POWERUP_DELAY_STEP_MS);
+
+  uint32_t min_reliable_delay = UINT32_MAX;
+
+  for (uint32_t delay = ANALOG_POWERUP_DELAY_MIN_MS; delay <= ANALOG_POWERUP_DELAY_MAX_MS; delay += ANALOG_POWERUP_DELAY_STEP_MS)
+  {
+    PowerOn();
+    FLEX_DelayMs(delay);
+
+    if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
+    {
+      printf("ERROR: Failed to init analog input\r\n");
+      PowerOff();
+      continue;
+    }
+
+    float readings[ANALOG_READ_COUNT_POWERUP];
+    for (int i = 0; i < ANALOG_READ_COUNT_POWERUP; i++)
+    {
+      uint32_t raw_mv = UINT32_MAX;
+      if (FLEX_AnalogInputReadVoltage(&raw_mv) == 0)
+      {
+        readings[i] = raw_mv / 1000.0f; // Convert to volts
+      }
+      else
+      {
+        readings[i] = 0;
+      }
+      FLEX_DelayMs(1); // Minimal delay between readings
+    }
+
+    Statistics stats;
+    CalculateStatistics(readings, ANALOG_READ_COUNT_POWERUP, &stats);
+    bool stable = IsAnalogStable(&stats);
+    bool alive = IsAnalogAlive(&stats);
+
+    FLEX_AnalogInputDeinit();
+    PowerOff();
+
+    printf("ANALOG_POWERUP: ts=%lu, delay=%lu, mean=%.3fV, std_dev=%.3fV, min=%.3fV, max=%.3fV, stable=%s, alive=%s\r\n",
+           GetTickMs(), delay, stats.mean, stats.std_dev, stats.min, stats.max,
+           stable ? "yes" : "no", alive ? "yes" : "no");
+
+    if (stable && delay < min_reliable_delay)
+    {
+      min_reliable_delay = delay;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  if (min_reliable_delay != UINT32_MAX)
+  {
+    printf("RESULT: Minimum reliable power-up delay = %lu ms\r\n", min_reliable_delay);
+  }
+  else
+  {
+    printf("RESULT: No reliable delay found in range\r\n");
+    min_reliable_delay = 1000; // Use default if not found
+  }
+  return min_reliable_delay;
+}
+
+static void TestAnalogReadingFrequency(uint32_t min_powerup_delay)
+{
+  printf("\r\n=== Analog Input Sensor: Reading Frequency Test ===\r\n");
+  printf("Using power-up delay: %lu ms\r\n", min_powerup_delay);
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         ANALOG_READ_DELAY_MIN_MS, ANALOG_READ_DELAY_MAX_MS, ANALOG_READ_DELAY_STEP_MS);
+
+  uint32_t min_reliable_delay = UINT32_MAX;
+
+  for (uint32_t delay = ANALOG_READ_DELAY_MIN_MS; delay <= ANALOG_READ_DELAY_MAX_MS; delay += ANALOG_READ_DELAY_STEP_MS)
+  {
+    PowerOn();
+    FLEX_DelayMs(min_powerup_delay);
+
+    if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
+    {
+      printf("ERROR: Failed to init analog input\r\n");
+      PowerOff();
+      continue;
+    }
+
+    float readings[ANALOG_READ_COUNT_FREQ];
+    for (int i = 0; i < ANALOG_READ_COUNT_FREQ; i++)
+    {
+      uint32_t raw_mv = UINT32_MAX;
+      if (FLEX_AnalogInputReadVoltage(&raw_mv) == 0)
+      {
+        readings[i] = raw_mv / 1000.0f;
+      }
+      else
+      {
+        readings[i] = 0;
+      }
+      if (delay > 0)
+        FLEX_DelayMs(delay);
+    }
+
+    Statistics stats;
+    CalculateStatistics(readings, ANALOG_READ_COUNT_FREQ, &stats);
+    bool stable = IsAnalogStable(&stats);
+    bool alive = IsAnalogAlive(&stats);
+
+    FLEX_AnalogInputDeinit();
+    PowerOff();
+
+    printf("ANALOG_FREQ: ts=%lu, delay=%lu, mean=%.3fV, std_dev=%.3fV, alive=%s\r\n",
+           GetTickMs(), delay, stats.mean, stats.std_dev, alive ? "yes" : "no");
+
+    if (stable && delay < min_reliable_delay)
+    {
+      min_reliable_delay = delay;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  if (min_reliable_delay != UINT32_MAX)
+  {
+    printf("RESULT: Minimum reliable reading delay = %lu ms\r\n", min_reliable_delay);
+  }
+  else
+  {
+    printf("RESULT: No reliable delay found in range\r\n");
+  }
+}
+
+#endif // ENABLE_ANALOG_TEST
+
+// Modbus Temperature Sensor Tests
+#if ENABLE_MODBUS_TEST
+
+static uint32_t TestModbusPowerUpDelay(void)
+{
+  printf("\r\n=== Modbus Temperature Sensor: Power-Up Delay Test ===\r\n");
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         MODBUS_POWERUP_DELAY_MIN_MS, MODBUS_POWERUP_DELAY_MAX_MS, MODBUS_POWERUP_DELAY_STEP_MS);
+
+  uint32_t min_reliable_delay = UINT32_MAX;
+  uint32_t success_count = 0;
+  uint32_t total_tests = 0;
+
+  for (uint32_t delay = MODBUS_POWERUP_DELAY_MIN_MS; delay <= MODBUS_POWERUP_DELAY_MAX_MS; delay += MODBUS_POWERUP_DELAY_STEP_MS)
+  {
+    PowerOn();
+    FLEX_DelayMs(delay);
+
+    uint32_t init_start = GetTickMs();
+    int init_result = Modbus_Init();
+    uint32_t init_duration = GetTickMs() - init_start;
+
+    bool read_success = false;
+    float temperature = 0;
+    uint32_t read_duration = 0;
+
+    if (init_result == 0)
+    {
+      uint32_t read_start = GetTickMs();
+      for (int retry = 0; retry < MODBUS_READ_RETRIES; retry++)
+      {
+        if (Modbus_Request_Receive_Temperature(&temperature) == 0)
+        {
+          read_success = true;
+          break;
+        }
+      }
+      read_duration = GetTickMs() - read_start;
+
+      uint32_t deinit_start = GetTickMs();
+      int deinit_result = Modbus_Deinit();
+      uint32_t deinit_duration = GetTickMs() - deinit_start;
+      (void)deinit_result; // Track but don't fail on deinit
+    }
+
+    PowerOff();
+
+    bool alive = (init_result == 0) && read_success;
+    uint32_t total_duration = init_duration + read_duration;
+
+    printf("MODBUS_POWERUP: ts=%lu, delay=%lu, init_ok=%d, read_ok=%d, temp=%.1f°C, duration=%lu, alive=%s\r\n",
+           GetTickMs(), delay, (init_result == 0), read_success, temperature, total_duration, alive ? "yes" : "no");
+
+    total_tests++;
+    if (alive)
+    {
+      success_count++;
+      if (delay < min_reliable_delay)
+      {
+        min_reliable_delay = delay;
+      }
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  float success_rate = (total_tests > 0) ? (success_count * 100.0f / total_tests) : 0;
+  if (min_reliable_delay == UINT32_MAX)
+  {
+    min_reliable_delay = 2000; // Use default if not found
+  }
+  printf("RESULT: Success rate = %.1f%%, Minimum reliable delay = %lu ms\r\n",
+         success_rate, min_reliable_delay);
+  return min_reliable_delay;
+}
+
+static void TestModbusReadingFrequency(uint32_t min_powerup_delay)
+{
+  printf("\r\n=== Modbus Temperature Sensor: Reading Frequency Test ===\r\n");
+  printf("Using power-up delay: %lu ms\r\n", min_powerup_delay);
+  printf("Sweep: %u-%u ms, step: %u ms\r\n",
+         MODBUS_READ_DELAY_MIN_MS, MODBUS_READ_DELAY_MAX_MS, MODBUS_READ_DELAY_STEP_MS);
+
+  uint32_t min_reliable_delay = UINT32_MAX;
+
+  for (uint32_t delay = MODBUS_READ_DELAY_MIN_MS; delay <= MODBUS_READ_DELAY_MAX_MS; delay += MODBUS_READ_DELAY_STEP_MS)
+  {
+    PowerOn();
+    FLEX_DelayMs(min_powerup_delay);
+
+    if (Modbus_Init() != 0)
+    {
+      printf("ERROR: Failed to init Modbus\r\n");
+      PowerOff();
+      continue;
+    }
+
+    uint32_t success_count = 0;
+    float temperatures[MODBUS_READ_ITERATIONS];
+    uint32_t durations[MODBUS_READ_ITERATIONS];
+
+    for (int i = 0; i < MODBUS_READ_ITERATIONS; i++)
+    {
+      uint32_t read_start = GetTickMs();
+      float temp = 0;
+      bool success = (Modbus_Request_Receive_Temperature(&temp) == 0);
+      uint32_t read_duration = GetTickMs() - read_start;
+
+      if (success)
+      {
+        temperatures[success_count] = temp;
+        durations[success_count] = read_duration;
+        success_count++;
+      }
+
+      if (delay > 0)
+        FLEX_DelayMs(delay);
+    }
+
+    int deinit_result = Modbus_Deinit();
+    PowerOff();
+
+    bool alive = (deinit_result == 0) && (success_count > 0);
+    float success_rate = (MODBUS_READ_ITERATIONS > 0) ? (success_count * 100.0f / MODBUS_READ_ITERATIONS) : 0;
+
+    float avg_temp = 0;
+    uint32_t avg_duration = 0;
+    if (success_count > 0)
+    {
+      for (uint32_t i = 0; i < success_count; i++)
+      {
+        avg_temp += temperatures[i];
+        avg_duration += durations[i];
+      }
+      avg_temp /= success_count;
+      avg_duration /= success_count;
+    }
+
+    printf("MODBUS_FREQ: ts=%lu, delay=%lu, success=%u/%d, rate=%.1f%%, avg_temp=%.1f°C, avg_duration=%lu, alive=%s\r\n",
+           GetTickMs(), delay, success_count, MODBUS_READ_ITERATIONS, success_rate, avg_temp, avg_duration, alive ? "yes" : "no");
+
+    if (alive && (success_rate >= MODBUS_SUCCESS_RATE_THRESHOLD) && delay < min_reliable_delay)
+    {
+      min_reliable_delay = delay;
+    }
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+
+  if (min_reliable_delay != UINT32_MAX)
+  {
+    printf("RESULT: Minimum reliable reading delay = %lu ms\r\n", min_reliable_delay);
+  }
+  else
+  {
+    printf("RESULT: No reliable delay found in range\r\n");
+  }
+}
+
+#endif // ENABLE_MODBUS_TEST
 
 void FLEX_AppInit()
 {
-  printf("%s\r\n", APPLICATION_NAME);
-  printf("Nilus App release_v03\r\n");
+  printf("\r\n%s\r\n", APPLICATION_NAME);
   printf("Compiled on %s at %s\r\n", __DATE__, __TIME__);
-  InitDevice();
-  FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
+  printf("Test configuration: PULSE=%d, ANALOG=%d, MODBUS=%d\r\n",
+         ENABLE_PULSE_TEST, ENABLE_ANALOG_TEST, ENABLE_MODBUS_TEST);
+
+  // Run tests sequentially
+#if ENABLE_PULSE_TEST
+  uint32_t pulse_powerup_delay = TestPulsePowerUpDelay();
+  TestPulseReadingFrequency(pulse_powerup_delay);
+#endif
+
+#if ENABLE_ANALOG_TEST
+  uint32_t analog_powerup_delay = TestAnalogPowerUpDelay();
+  TestAnalogReadingFrequency(analog_powerup_delay);
+#endif
+
+#if ENABLE_MODBUS_TEST
+  uint32_t modbus_powerup_delay = TestModbusPowerUpDelay();
+  TestModbusReadingFrequency(modbus_powerup_delay);
+#endif
+
+  printf("\r\n=== Calibration Complete ===\r\n");
 }
