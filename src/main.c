@@ -135,7 +135,7 @@ static void CalculatePulseStats(PulseReading *readings, uint32_t count, PulseSta
   stats->std_dev_rate = sqrtf(variance / valid);
 }
 
-static bool TestPulsePowerUpDelay(uint32_t delay_ms, PulseReading *reading_out)
+static bool TestPulsePowerUpDelaySingle(uint32_t delay_ms, PulseReading *reading_out)
 {
   PowerOn();
   FLEX_DelayMs(delay_ms);
@@ -181,7 +181,7 @@ static void TestPulsePowerUpDelay(void)
   for (uint32_t delay = PULSE_POWERUP_DELAY_MIN_MS; delay <= PULSE_POWERUP_DELAY_MAX_MS; delay += PULSE_POWERUP_DELAY_STEP_MS)
   {
     PulseReading reading;
-    if (!TestPulsePowerUpDelay(delay, &reading))
+    if (!TestPulsePowerUpDelaySingle(delay, &reading))
     {
       printf("delay=%lu | ERROR: Test failed\r\n", delay);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
@@ -212,7 +212,7 @@ static void TestPulsePowerUpDelay(void)
   }
 }
 
-static bool TestPulseInitCycleDelay(uint32_t powerup_delay_ms, uint32_t init_delay_ms, PulseStats *stats_out)
+static bool TestPulseInitCycleDelaySingle(uint32_t powerup_delay_ms, uint32_t init_delay_ms, PulseStats *stats_out)
 {
   PowerOn();
   FLEX_DelayMs(powerup_delay_ms);
@@ -265,7 +265,7 @@ static void TestPulseInitCycleDelay(void)
   const uint32_t POWERUP_DELAY_MS = 100;  // Use minimum from power-up test
   
   printf("\r\n=== Test 2: Pulse Sensor Init/Deinit Cycle Delay ===\r\n");
-  printf("Power-up delay: %ums (fixed)\r\n", POWERUP_DELAY_MS);
+  printf("Power-up delay: %lums (fixed)\r\n", (unsigned long)POWERUP_DELAY_MS);
   printf("Sweep delay between init/deinit cycles: %u-%u ms, step: %u ms\r\n",
          PULSE_INIT_DELAY_MIN_MS, PULSE_INIT_DELAY_MAX_MS, PULSE_INIT_DELAY_STEP_MS);
   printf("Count window: %ums per cycle, %d cycles\r\n", PULSE_COUNT_WINDOW_MS, PULSE_READ_ITERATIONS);
@@ -279,7 +279,7 @@ static void TestPulseInitCycleDelay(void)
   for (uint32_t delay = PULSE_INIT_DELAY_MIN_MS; delay <= PULSE_INIT_DELAY_MAX_MS; delay += PULSE_INIT_DELAY_STEP_MS)
   {
     PulseStats stats;
-    if (!TestPulseInitCycleDelay(POWERUP_DELAY_MS, delay, &stats))
+    if (!TestPulseInitCycleDelaySingle(POWERUP_DELAY_MS, delay, &stats))
     {
       printf("delay=%lu | ERROR: Test failed\r\n", delay);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
