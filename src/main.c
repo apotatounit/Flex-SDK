@@ -25,13 +25,15 @@
 #define PULSE_READ_DELAY_STEP_MS 5
 
 // Test ranges for analog sensor
-#define ANALOG_POWERUP_DELAY_MIN_MS 0
-#define ANALOG_POWERUP_DELAY_MAX_MS 200
-#define ANALOG_POWERUP_DELAY_STEP_MS 10
+#define ANALOG_POWERUP_DELAY_MS 100  // Fixed power-up delay
+#define ANALOG_SETTLE_TIME_MIN_MS 0
+#define ANALOG_SETTLE_TIME_MAX_MS 200
+#define ANALOG_SETTLE_TIME_STEP_MS 10
 
 #define ANALOG_READ_DELAY_MIN_MS 0
 #define ANALOG_READ_DELAY_MAX_MS 20
 #define ANALOG_READ_DELAY_STEP_MS 1
+#define ANALOG_SETTLE_TEST_INTERVAL_MS 50  // Fixed interval for settle time test
 
 // Test parameters
 #define PULSE_COUNT_WINDOW_MS 1000  // Count pulses for 1 second
@@ -442,64 +444,78 @@ static void CalculateAnalogStats(float *voltages, uint32_t count, AnalogStats *s
   stats->std_dev_mv = sqrtf(variance / valid) * 1000.0f; // Convert to mV
 }
 
-static bool TestAnalogPowerUpDelaySingle(uint32_t delay_ms, AnalogStats *stats_out)
+static bool TestAnalogSettleAndInterval(uint32_t settle_ms, uint32_t interval_ms, AnalogStats *stats_out)
 {
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
     return false;
   }
-  FLEX_DelayMs(delay_ms);
+  FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
 
   if (FLEX_AnalogInputInit(FLEX_ANALOG_IN_VOLTAGE) != 0)
   {
     FLEX_PowerOutDeinit();
     return false;
   }
+  
+  // Wait for settle time (after analog init)
+  FLEX_DelayMs(settle_ms);
 
+  // Take readings with specified interval
   float voltages[ANALOG_READ_ITERATIONS];
+  uint32_t valid_count = 0;
+  
   for (uint32_t i = 0; i < ANALOG_READ_ITERATIONS; i++)
   {
-    uint32_t voltage_mv = 0;
-    if (FLEX_AnalogInputReadVoltage(&voltage_mv) == 0)
+    uint32_t raw_mv = UINT32_MAX;
+    int result = FLEX_AnalogInputReadVoltage(&raw_mv);
+    
+    if (result == 0 && raw_mv != UINT32_MAX)
     {
-      voltages[i] = voltage_mv / 1000.0f; // Convert mV to V
+      voltages[valid_count] = raw_mv / 1000.0f; // Convert mV to V
+      valid_count++;
     }
-    else
+    
+    if (i < ANALOG_READ_ITERATIONS - 1 && interval_ms > 0)
     {
-      voltages[i] = -1.0f; // Invalid reading
-    }
-    // Minimal delay between readings
-    if (i < ANALOG_READ_ITERATIONS - 1)
-    {
-      FLEX_DelayMs(1);
+      FLEX_DelayMs(interval_ms);
     }
   }
 
+  if (valid_count == 0)
+  {
+    FLEX_AnalogInputDeinit();
+    FLEX_PowerOutDeinit();
+    return false;
+  }
+
+  CalculateAnalogStats(voltages, valid_count, stats_out);
+  
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
-
-  CalculateAnalogStats(voltages, ANALOG_READ_ITERATIONS, stats_out);
+  
   return true;
 }
 
 static void TestAnalogPowerUpDelay(void)
 {
-  printf("\r\n=== Test 1: Analog Sensor Power-Up Delay ===\r\n");
-  printf("Sweep: %u-%u ms, step: %u ms\r\n",
-         ANALOG_POWERUP_DELAY_MIN_MS, ANALOG_POWERUP_DELAY_MAX_MS, ANALOG_POWERUP_DELAY_STEP_MS);
-  printf("Taking %d readings per test (1ms between readings)\r\n", ANALOG_READ_ITERATIONS);
-  printf("Format: delay(ms) | mean(V) | std_dev(mV) | range(V) | stable | alive\r\n");
+  printf("\r\n=== Test 1: Analog Sensor Minimal Settle Time (after analog init) ===\r\n");
+  printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
+  printf("Sample interval: %ums (fixed)\r\n", ANALOG_SETTLE_TEST_INTERVAL_MS);
+  printf("Sweep settle time: %u-%u ms, step: %u ms\r\n",
+         ANALOG_SETTLE_TIME_MIN_MS, ANALOG_SETTLE_TIME_MAX_MS, ANALOG_SETTLE_TIME_STEP_MS);
+  printf("Format: settle(ms) | mean(V) | std_dev(mV) | range(V) | stable | alive\r\n");
   printf("------------------------------------------------------------\r\n");
 
-  uint32_t min_stable_delay = UINT32_MAX;
+  uint32_t min_stable_settle = UINT32_MAX;
   bool found_stable = false;
 
-  for (uint32_t delay = ANALOG_POWERUP_DELAY_MIN_MS; delay <= ANALOG_POWERUP_DELAY_MAX_MS; delay += ANALOG_POWERUP_DELAY_STEP_MS)
+  for (uint32_t settle = ANALOG_SETTLE_TIME_MIN_MS; settle <= ANALOG_SETTLE_TIME_MAX_MS; settle += ANALOG_SETTLE_TIME_STEP_MS)
   {
     AnalogStats stats;
-    if (!TestAnalogPowerUpDelaySingle(delay, &stats))
+    if (!TestAnalogSettleAndInterval(settle, ANALOG_SETTLE_TEST_INTERVAL_MS, &stats))
     {
-      printf("delay=%lu | ERROR: Test failed\r\n", (unsigned long)delay);
+      printf("settle=%lu | ERROR: Test failed\r\n", (unsigned long)settle);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
       continue;
     }
@@ -507,14 +523,14 @@ static void TestAnalogPowerUpDelay(void)
     bool stable = IsStable(stats.std_dev_mv, stats.min_v, stats.max_v);
     bool alive = (stats.valid_readings > 0) && IsAnalogSensorAlive(stats.mean_v);
 
-    printf("delay=%lu | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s | alive=%s\r\n",
-           (unsigned long)delay, stats.mean_v, stats.std_dev_mv,
+    printf("settle=%lu | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s | alive=%s\r\n",
+           (unsigned long)settle, stats.mean_v, stats.std_dev_mv,
            stats.min_v, stats.max_v,
            stable ? "YES" : "no", alive ? "YES" : "no");
 
-    if (stable && delay < min_stable_delay)
+    if (stable && settle < min_stable_settle)
     {
-      min_stable_delay = delay;
+      min_stable_settle = settle;
       found_stable = true;
     }
 
@@ -524,40 +540,43 @@ static void TestAnalogPowerUpDelay(void)
   printf("\r\n=== Results ===\r\n");
   if (found_stable)
   {
-    printf("Minimum stable power-up delay: %lu ms\r\n", (unsigned long)min_stable_delay);
+    printf("Minimum stable settle time: %lu ms\r\n", (unsigned long)min_stable_settle);
   }
   else
   {
-    printf("No stable delay found in range\r\n");
+    printf("No stable settle time found in range\r\n");
   }
 }
 
-static bool TestAnalogReadingFrequencySingle(uint32_t powerup_delay_ms, uint32_t read_delay_ms, AnalogStats *stats_out)
+static bool TestAnalogReadingFrequencySingle(uint32_t settle_ms, uint32_t read_delay_ms, AnalogStats *stats_out)
 {
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
     return false;
   }
-  FLEX_DelayMs(powerup_delay_ms);
+  FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
 
   if (FLEX_AnalogInputInit(FLEX_ANALOG_IN_VOLTAGE) != 0)
   {
     FLEX_PowerOutDeinit();
     return false;
   }
+  
+  // Wait for settle time (using minimum from test 1)
+  FLEX_DelayMs(settle_ms);
 
   float voltages[ANALOG_FREQ_READ_ITERATIONS];
+  uint32_t valid_count = 0;
 
   for (uint32_t i = 0; i < ANALOG_FREQ_READ_ITERATIONS; i++)
   {
-    uint32_t voltage_mv = 0;
-    if (FLEX_AnalogInputReadVoltage(&voltage_mv) == 0)
+    uint32_t raw_mv = UINT32_MAX;
+    int result = FLEX_AnalogInputReadVoltage(&raw_mv);
+    
+    if (result == 0 && raw_mv != UINT32_MAX)
     {
-      voltages[i] = voltage_mv / 1000.0f; // Convert mV to V
-    }
-    else
-    {
-      voltages[i] = -1.0f; // Invalid reading
+      voltages[valid_count] = raw_mv / 1000.0f; // Convert mV to V
+      valid_count++;
     }
 
     if (read_delay_ms > 0 && i < ANALOG_FREQ_READ_ITERATIONS - 1)
@@ -566,19 +585,28 @@ static bool TestAnalogReadingFrequencySingle(uint32_t powerup_delay_ms, uint32_t
     }
   }
 
+  if (valid_count == 0)
+  {
+    FLEX_AnalogInputDeinit();
+    FLEX_PowerOutDeinit();
+    return false;
+  }
+
+  CalculateAnalogStats(voltages, valid_count, stats_out);
+  
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
-
-  CalculateAnalogStats(voltages, ANALOG_FREQ_READ_ITERATIONS, stats_out);
+  
   return true;
 }
 
 static void TestAnalogReadingFrequency(void)
 {
-  const uint32_t POWERUP_DELAY_MS = 100;  // Use minimum from power-up test
+  const uint32_t SETTLE_TIME_MS = 130;  // Use minimum from settle time test
   
   printf("\r\n=== Test 2: Analog Sensor Reading Frequency ===\r\n");
-  printf("Power-up delay: %lums (fixed)\r\n", (unsigned long)POWERUP_DELAY_MS);
+  printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
+  printf("Settle time: %lums (fixed, using minimum stable from Test 1)\r\n", (unsigned long)SETTLE_TIME_MS);
   printf("Taking %d consecutive readings with delay between each\r\n", ANALOG_FREQ_READ_ITERATIONS);
   printf("Sweep read delay: %u-%u ms, step: %u ms\r\n",
          ANALOG_READ_DELAY_MIN_MS, ANALOG_READ_DELAY_MAX_MS, ANALOG_READ_DELAY_STEP_MS);
@@ -591,7 +619,7 @@ static void TestAnalogReadingFrequency(void)
   for (uint32_t delay = ANALOG_READ_DELAY_MIN_MS; delay <= ANALOG_READ_DELAY_MAX_MS; delay += ANALOG_READ_DELAY_STEP_MS)
   {
     AnalogStats stats;
-    if (!TestAnalogReadingFrequencySingle(POWERUP_DELAY_MS, delay, &stats))
+    if (!TestAnalogReadingFrequencySingle(SETTLE_TIME_MS, delay, &stats))
     {
       printf("delay=%lu | ERROR: Test failed\r\n", (unsigned long)delay);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
