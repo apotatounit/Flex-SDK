@@ -23,9 +23,10 @@
 
 #define ENABLE_TRANSMIT 0
 #define ENABLE_MODBUS 1
-/** Set to 1 to scan Modbus slaves 0x01..0x0F after init and print which address has a temperature sensor. */
+/** Set to 1 to scan Modbus slaves 0x01..0x0F after init. Tune MODBUS_SCAN_SETTLE_MS to find minimal delay. */
 #define MODBUS_SCAN_AFTER_INIT 1
-bool bInitModbusRequired = true; // only required on first init after power supply init
+#define MODBUS_SCAN_SETTLE_MS  50  /* minimal delay after Modbus_Init before scan (tune down to 0 to find minimum) */
+bool bInitModbusRequired = true;
 #define LED_BLINK_DELAY 200      // ms
 
 typedef struct
@@ -319,12 +320,12 @@ static int InitSensors(void)
       bInitModbusRequired = false;
       printf("Modbus initialised.\r\n");
 #if MODBUS_SCAN_AFTER_INIT
+      if (MODBUS_SCAN_SETTLE_MS > 0)
+        FLEX_DelayMs(MODBUS_SCAN_SETTLE_MS);
       {
-        FLEX_DelayMs(300); /* let RS485/sensor settle after init before scan */
         uint8_t slave = 0;
         float scan_temp = MODBUS_TEMPERATURE_INVALID;
-        if (Modbus_ScanForTemperatureSensor(&slave, &scan_temp) == 0)
-          printf("Modbus temperature sensor at slave 0x%02X\r\n", (unsigned)slave);
+        Modbus_ScanForTemperatureSensor(&slave, &scan_temp);
       }
 #endif
     }
@@ -343,7 +344,9 @@ static void DeinitSensors(void)
 {
   if (ENABLE_MODBUS)
   {
-    Modbus_Deinit();
+    printf("Modbus_Deinit: disabling...\r\n");
+    int r = Modbus_Deinit();
+    printf("Modbus_Deinit: %s\r\n", r ? "done (with error)" : "done");
     bInitModbusRequired = true;
   }
   FLEX_AnalogInputDeinit();
