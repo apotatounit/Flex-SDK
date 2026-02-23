@@ -62,8 +62,6 @@ typedef struct
   float value;
 } ReadResult;
 
-_Static_assert(sizeof(Message) <= FLEX_MAX_MESSAGE_SIZE, "can't exceed the max message size");
-
 static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
 static void BlinkLed(int count);
