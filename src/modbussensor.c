@@ -58,9 +58,10 @@ inline int16_t merge_i16(const uint8_t hi, const uint8_t low)
   return (int16_t)((uint16_t)hi << 8 | (uint16_t)low);
 }
 
-#define MODBUS_SCAN_SLAVE_MIN 0x01
-#define MODBUS_SCAN_SLAVE_MAX 0x0F
-#define MODBUS_TEMP_REG_ADDR  0x0001
+#define MODBUS_SCAN_SLAVE_MIN  0x01
+#define MODBUS_SCAN_SLAVE_MAX  0x0F
+#define MODBUS_TEMP_REG_ADDR   0x0001
+#define MODBUS_SCAN_RETRIES    2  /* retries per slave (bus may not be ready right after init) */
 
 /** Read temperature from a specific slave (input register 0x0001, 2 regs, value in tenths °C). */
 static int modbus_read_temperature_at_slave(const MYRIOTA_ModbusHandle handle,
@@ -94,7 +95,9 @@ int Modbus_ScanForTemperatureSensor(uint8_t *out_slave_addr, float *out_temperat
   for (uint8_t slave = MODBUS_SCAN_SLAVE_MIN; slave <= MODBUS_SCAN_SLAVE_MAX; slave++)
   {
     float t = MODBUS_TEMPERATURE_INVALID;
-    int r = modbus_read_temperature_at_slave(handle, slave, &t);
+    int r = -1;
+    for (int attempt = 0; attempt < MODBUS_SCAN_RETRIES && r != MODBUS_SUCCESS; attempt++)
+      r = modbus_read_temperature_at_slave(handle, slave, &t);
     if (r == MODBUS_SUCCESS && !isnan(t))
     {
       if (out_slave_addr) *out_slave_addr = slave;

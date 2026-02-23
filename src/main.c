@@ -21,7 +21,7 @@
 #define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
 // #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
 
-#define ENABLE_TRANSMIT 1
+#define ENABLE_TRANSMIT 0
 #define ENABLE_MODBUS 1
 /** Set to 1 to scan Modbus slaves 0x01..0x0F after init and print which address has a temperature sensor. */
 #define MODBUS_SCAN_AFTER_INIT 1
@@ -320,6 +320,7 @@ static int InitSensors(void)
       printf("Modbus initialised.\r\n");
 #if MODBUS_SCAN_AFTER_INIT
       {
+        FLEX_DelayMs(300); /* let RS485/sensor settle after init before scan */
         uint8_t slave = 0;
         float scan_temp = MODBUS_TEMPERATURE_INVALID;
         if (Modbus_ScanForTemperatureSensor(&slave, &scan_temp) == 0)
@@ -477,7 +478,7 @@ static int send_message(Message message)
 void FLEX_AppInit()
 {
   printf("%s\r\n", APPLICATION_NAME);
-  printf("Nilus App release_v03\r\n");
+  printf("Nilus App dev_v04\r\n");
   printf("Compiled on %s at %s\r\n", __DATE__, __TIME__);
   InitDevice();
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
