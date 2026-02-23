@@ -11,12 +11,12 @@
 
 // Test ranges for settle time and sampling interval
 #define SETTLE_TIME_MIN_MS 0
-#define SETTLE_TIME_MAX_MS 500
+#define SETTLE_TIME_MAX_MS 200
 #define SETTLE_TIME_STEP_MS 10
 
-#define SAMPLE_INTERVAL_MIN_MS 1
-#define SAMPLE_INTERVAL_MAX_MS 200
-#define SAMPLE_INTERVAL_STEP_MS 5
+#define SAMPLE_INTERVAL_MIN_MS 0
+#define SAMPLE_INTERVAL_MAX_MS 20
+#define SAMPLE_INTERVAL_STEP_MS 1
 
 // Test parameters
 #define ANALOG_READ_COUNT 10
@@ -195,8 +195,8 @@ static void TestMinimalSettleTime(void)
 
 static void TestMinimalSampleInterval(void)
 {
-  // Use minimum stable settle time from Test 1 (110ms) + margin = 120ms
-  const uint32_t SETTLE_TIME_FOR_INTERVAL_TEST_MS = 120;
+  // Use minimum stable settle time: 130ms
+  const uint32_t SETTLE_TIME_FOR_INTERVAL_TEST_MS = 130;
   
   printf("\r\n=== Test 2: Minimal Sample Interval ===\r\n");
   printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
@@ -244,6 +244,112 @@ static void TestMinimalSampleInterval(void)
   }
 }
 
+static void TestVerificationWithMinimums(void)
+{
+  const uint32_t MIN_SETTLE_MS = 130;
+  const uint32_t MIN_INTERVAL_MS = 1;
+  
+  printf("\r\n=== Test 3: Verification with Minimum Values ===\r\n");
+  printf("Using minimum values: power-up=%ums, settle=%ums, interval=%ums\r\n",
+         ANALOG_POWERUP_DELAY_MS, MIN_SETTLE_MS, MIN_INTERVAL_MS);
+  printf("Running 5 cycles to verify stability...\r\n");
+  printf("Format: cycle | mean(V) | std_dev(mV) | range(V) | stable\r\n");
+  printf("------------------------------------------------------------\r\n");
+
+  for (int cycle = 1; cycle <= 5; cycle++)
+  {
+    StabilityStats stats;
+    if (!TestSettleAndInterval(MIN_SETTLE_MS, MIN_INTERVAL_MS, &stats))
+    {
+      printf("cycle=%d | ERROR: Test failed\r\n", cycle);
+      FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+      continue;
+    }
+
+    bool stable = IsStable(&stats);
+    printf("cycle=%d | mean=%.3fV | std_dev=%.1fmV | range=%.3f-%.3fV | stable=%s\r\n",
+           cycle, stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max,
+           stable ? "YES" : "no");
+
+    FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
+  }
+  
+  printf("\r\n=== Verification Complete ===\r\n");
+}
+
+static void TestReadingFrequency(void)
+{
+  const uint32_t SETTLE_MS = 130;
+  const uint32_t INTERVAL_MS = 1;
+  const uint32_t NUM_READINGS = 100;  // Test with many consecutive readings
+  
+  printf("\r\n=== Test 4: Reading Frequency Test ===\r\n");
+  printf("Power-up delay: %ums, Settle: %ums, Interval: %ums\r\n",
+         ANALOG_POWERUP_DELAY_MS, SETTLE_MS, INTERVAL_MS);
+  printf("Taking %u consecutive readings to test frequency...\r\n", NUM_READINGS);
+  
+  PowerOn();
+  FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
+  
+  if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
+  {
+    printf("ERROR: Failed to init analog input\r\n");
+    PowerOff();
+    return;
+  }
+  
+  FLEX_DelayMs(SETTLE_MS);
+  
+  float readings[NUM_READINGS];
+  uint32_t valid_count = 0;
+  uint32_t start_tick = FLEX_TickGet();
+  
+  for (uint32_t i = 0; i < NUM_READINGS; i++)
+  {
+    uint32_t raw_mv = UINT32_MAX;
+    int result = FLEX_AnalogInputReadVoltage(&raw_mv);
+    
+    if (result == 0 && raw_mv != UINT32_MAX)
+    {
+      readings[valid_count] = raw_mv / 1000.0f;
+      valid_count++;
+    }
+    
+    if (i < NUM_READINGS - 1 && INTERVAL_MS > 0)
+    {
+      FLEX_DelayMs(INTERVAL_MS);
+    }
+  }
+  
+  uint32_t end_tick = FLEX_TickGet();
+  uint32_t total_time_ms = end_tick - start_tick;
+  
+  FLEX_AnalogInputDeinit();
+  PowerOff();
+  
+  if (valid_count > 0)
+  {
+    StabilityStats stats;
+    CalculateStability(readings, valid_count, &stats);
+    bool stable = IsStable(&stats);
+    
+    float avg_time_per_read = (float)total_time_ms / valid_count;
+    float reads_per_second = 1000.0f / avg_time_per_read;
+    
+    printf("Results: %lu valid readings in %lu ms\r\n", (unsigned long)valid_count, total_time_ms);
+    printf("Mean: %.3fV, Std dev: %.1fmV, Range: %.3f-%.3fV\r\n",
+           stats.mean, stats.std_dev * 1000.0f, stats.min, stats.max);
+    printf("Average time per read: %.2f ms (%.1f reads/sec)\r\n", avg_time_per_read, reads_per_second);
+    printf("Stable: %s\r\n", stable ? "YES" : "no");
+  }
+  else
+  {
+    printf("ERROR: No valid readings\r\n");
+  }
+  
+  printf("\r\n=== Reading Frequency Test Complete ===\r\n");
+}
+
 void FLEX_AppInit()
 {
   printf("\r\n%s\r\n", APPLICATION_NAME);
@@ -251,6 +357,8 @@ void FLEX_AppInit()
 
   TestMinimalSettleTime();
   TestMinimalSampleInterval();
+  TestVerificationWithMinimums();
+  TestReadingFrequency();
 
   printf("\r\n=== All Tests Complete ===\r\n");
 }
