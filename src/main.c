@@ -200,7 +200,7 @@ static void TestMinimalSampleInterval(void)
   
   printf("\r\n=== Test 2: Minimal Sample Interval ===\r\n");
   printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
-  printf("Settle time: %ums (fixed, using minimum stable from Test 1)\r\n", SETTLE_TIME_FOR_INTERVAL_TEST_MS);
+  printf("Settle time: %lums (fixed, using minimum stable from Test 1)\r\n", (unsigned long)SETTLE_TIME_FOR_INTERVAL_TEST_MS);
   printf("Sweep sample interval: %u-%u ms, step: %u ms\r\n",
          SAMPLE_INTERVAL_MIN_MS, SAMPLE_INTERVAL_MAX_MS, SAMPLE_INTERVAL_STEP_MS);
   printf("Format: interval(ms) | mean(V) | std_dev(mV) | range(V) | stable\r\n");
