@@ -250,8 +250,8 @@ static void TestVerificationWithMinimums(void)
   const uint32_t MIN_INTERVAL_MS = 1;
   
   printf("\r\n=== Test 3: Verification with Minimum Values ===\r\n");
-  printf("Using minimum values: power-up=%ums, settle=%ums, interval=%ums\r\n",
-         ANALOG_POWERUP_DELAY_MS, MIN_SETTLE_MS, MIN_INTERVAL_MS);
+  printf("Using minimum values: power-up=%ums, settle=%lums, interval=%lums\r\n",
+         ANALOG_POWERUP_DELAY_MS, (unsigned long)MIN_SETTLE_MS, (unsigned long)MIN_INTERVAL_MS);
   printf("Running 5 cycles to verify stability...\r\n");
   printf("Format: cycle | mean(V) | std_dev(mV) | range(V) | stable\r\n");
   printf("------------------------------------------------------------\r\n");
@@ -284,9 +284,9 @@ static void TestReadingFrequency(void)
   const uint32_t NUM_READINGS = 100;  // Test with many consecutive readings
   
   printf("\r\n=== Test 4: Reading Frequency Test ===\r\n");
-  printf("Power-up delay: %ums, Settle: %ums, Interval: %ums\r\n",
-         ANALOG_POWERUP_DELAY_MS, SETTLE_MS, INTERVAL_MS);
-  printf("Taking %u consecutive readings to test frequency...\r\n", NUM_READINGS);
+  printf("Power-up delay: %ums, Settle: %lums, Interval: %lums\r\n",
+         ANALOG_POWERUP_DELAY_MS, (unsigned long)SETTLE_MS, (unsigned long)INTERVAL_MS);
+  printf("Taking %lu consecutive readings to test frequency...\r\n", (unsigned long)NUM_READINGS);
   
   PowerOn();
   FLEX_DelayMs(ANALOG_POWERUP_DELAY_MS);
