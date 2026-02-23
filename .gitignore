@@ -1,5 +1,5 @@
 *.a
-# *.bin
+*.bin
 *.sha256
 network_info
 .vscode
