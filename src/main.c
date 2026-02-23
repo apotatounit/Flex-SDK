@@ -547,7 +547,6 @@ static bool TestAnalogReadingFrequencySingle(uint32_t powerup_delay_ms, uint32_t
   }
 
   float voltages[ANALOG_FREQ_READ_ITERATIONS];
-  uint32_t start_tick = FLEX_TickGet();
 
   for (uint32_t i = 0; i < ANALOG_FREQ_READ_ITERATIONS; i++)
   {
