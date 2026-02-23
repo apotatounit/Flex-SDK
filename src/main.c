@@ -195,9 +195,12 @@ static void TestMinimalSettleTime(void)
 
 static void TestMinimalSampleInterval(void)
 {
+  // Use minimum stable settle time from Test 1 (110ms) + margin = 120ms
+  const uint32_t SETTLE_TIME_FOR_INTERVAL_TEST_MS = 120;
+  
   printf("\r\n=== Test 2: Minimal Sample Interval ===\r\n");
   printf("Power-up delay: %ums (fixed)\r\n", ANALOG_POWERUP_DELAY_MS);
-  printf("Settle time: 100ms (fixed)\r\n");
+  printf("Settle time: %ums (fixed, using minimum stable from Test 1)\r\n", SETTLE_TIME_FOR_INTERVAL_TEST_MS);
   printf("Sweep sample interval: %u-%u ms, step: %u ms\r\n",
          SAMPLE_INTERVAL_MIN_MS, SAMPLE_INTERVAL_MAX_MS, SAMPLE_INTERVAL_STEP_MS);
   printf("Format: interval(ms) | mean(V) | std_dev(mV) | range(V) | stable\r\n");
@@ -209,7 +212,7 @@ static void TestMinimalSampleInterval(void)
   for (uint32_t interval = SAMPLE_INTERVAL_MIN_MS; interval <= SAMPLE_INTERVAL_MAX_MS; interval += SAMPLE_INTERVAL_STEP_MS)
   {
     StabilityStats stats;
-    if (!TestSettleAndInterval(100, interval, &stats))
+    if (!TestSettleAndInterval(SETTLE_TIME_FOR_INTERVAL_TEST_MS, interval, &stats))
     {
       printf("interval=%lu | ERROR: Test failed\r\n", interval);
       FLEX_DelayMs(INTER_CYCLE_DELAY_MS);
