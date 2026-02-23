@@ -5,6 +5,7 @@
 # Prerequisites:
 #   - GitHub CLI: brew install gh && gh auth login
 #   - A Codespace for this repo (create one in the browser or: gh codespace create)
+#   - To avoid typing your SSH key passphrase 4 times, run once: eval $(ssh-agent); ssh-add
 #
 # Usage:
 #   ./build-via-codespace.sh              # build in Codespace, download to ./build/
@@ -38,7 +39,10 @@ if ! command -v gh &>/dev/null; then
   echo "Error: GitHub CLI (gh) is required. Install: brew install gh && gh auth login"
   exit 1
 fi
-
+if [[ -z "${SSH_AUTH_SOCK:-}" ]] || ! ssh-add -l &>/dev/null; then
+  echo "Tip: To avoid typing your SSH passphrase 4 times, run: eval \$(ssh-agent); ssh-add"
+  echo ""
+fi
 if [[ -n "${PUSH:-}" ]]; then
   echo "==> Staging and committing..."
   git add -A
