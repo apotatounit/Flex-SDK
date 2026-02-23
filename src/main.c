@@ -450,7 +450,7 @@ static bool TestAnalogPowerUpDelaySingle(uint32_t delay_ms, AnalogStats *stats_o
   }
   FLEX_DelayMs(delay_ms);
 
-  if (FLEX_AnalogInputInit(FLEX_ANALOG_INPUT_DEFAULT) != 0)
+  if (FLEX_AnalogInputInit(FLEX_ANALOG_IN_VOLTAGE) != 0)
   {
     FLEX_PowerOutDeinit();
     return false;
@@ -540,7 +540,7 @@ static bool TestAnalogReadingFrequencySingle(uint32_t powerup_delay_ms, uint32_t
   }
   FLEX_DelayMs(powerup_delay_ms);
 
-  if (FLEX_AnalogInputInit(FLEX_ANALOG_INPUT_DEFAULT) != 0)
+  if (FLEX_AnalogInputInit(FLEX_ANALOG_IN_VOLTAGE) != 0)
   {
     FLEX_PowerOutDeinit();
     return false;
@@ -566,9 +566,6 @@ static bool TestAnalogReadingFrequencySingle(uint32_t powerup_delay_ms, uint32_t
       FLEX_DelayMs(read_delay_ms);
     }
   }
-
-  uint32_t end_tick = FLEX_TickGet();
-  uint32_t total_duration_ms = end_tick - start_tick;
 
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
