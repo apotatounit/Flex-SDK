@@ -58,14 +58,69 @@ inline int16_t merge_i16(const uint8_t hi, const uint8_t low)
   return (int16_t)((uint16_t)hi << 8 | (uint16_t)low);
 }
 
+#define MODBUS_SCAN_SLAVE_MIN 0x01
+#define MODBUS_SCAN_SLAVE_MAX 0x0F
+#define MODBUS_TEMP_REG_ADDR  0x0001
+
+/** Read temperature from a specific slave (input register 0x0001, 2 regs, value in tenths °C). */
+static int modbus_read_temperature_at_slave(const MYRIOTA_ModbusHandle handle,
+    MYRIOTA_ModbusDeviceAddress slave, float *const temperature)
+{
+  uint8_t response_bytes[4] = {0};
+  const MYRIOTA_ModbusDataAddress addr = MODBUS_TEMP_REG_ADDR;
+
+  int result = MYRIOTA_ModbusReadInputRegisters(handle, slave, addr, 2, response_bytes);
+  if (result != MODBUS_SUCCESS)
+    return result;
+  if (response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
+    return -MODBUS_ERROR_IO_FAILURE; /* treat all-zero as no sensor */
+  int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
+  *temperature = (float)temp_raw / 10.0f;
+  return MODBUS_SUCCESS;
+}
+
+int Modbus_ScanForTemperatureSensor(uint8_t *out_slave_addr, float *out_temperature)
+{
+  const MYRIOTA_ModbusHandle handle = application_context.modbus_handle;
+  if (handle <= 0)
+  {
+    if (out_slave_addr) *out_slave_addr = 0;
+    if (out_temperature) *out_temperature = MODBUS_TEMPERATURE_INVALID;
+    return -1;
+  }
+  if (out_slave_addr) *out_slave_addr = 0;
+  if (out_temperature) *out_temperature = MODBUS_TEMPERATURE_INVALID;
+
+  for (uint8_t slave = MODBUS_SCAN_SLAVE_MIN; slave <= MODBUS_SCAN_SLAVE_MAX; slave++)
+  {
+    float t = MODBUS_TEMPERATURE_INVALID;
+    int r = modbus_read_temperature_at_slave(handle, slave, &t);
+    if (r == MODBUS_SUCCESS && !isnan(t))
+    {
+      if (out_slave_addr) *out_slave_addr = slave;
+      if (out_temperature) *out_temperature = t;
+      printf("Modbus scan: found temperature sensor at slave 0x%02X, %.1f °C\n", (unsigned)slave, (double)t);
+      return 0;
+    }
+  }
+  printf("Modbus scan: no temperature sensor found (slaves 0x%02X..0x%02X)\n",
+      (unsigned)MODBUS_SCAN_SLAVE_MIN, (unsigned)MODBUS_SCAN_SLAVE_MAX);
+  return -1;
+}
+
 int Modbus_Request_Receive_Temperature(float *const temperature)
 {
   const MYRIOTA_ModbusHandle handle = application_context.modbus_handle;
 
-  // uint8_t request_bytes[4] = {0};
+  if (temperature)
+    *temperature = MODBUS_TEMPERATURE_INVALID;
+
+  if (handle <= 0)
+    return -MODBUS_ERROR_INVALID_HANDLE;
+
   uint8_t response_bytes[4] = {0};
   const MYRIOTA_ModbusDeviceAddress slave = 0x01;
-  const MYRIOTA_ModbusDataAddress addr = 0x0001;
+  const MYRIOTA_ModbusDataAddress addr = MODBUS_TEMP_REG_ADDR;
 
   int result = MODBUS_ERROR_IO_FAILURE;
 
@@ -73,26 +128,15 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
   {
     memset(response_bytes, 0xFFFF, sizeof(response_bytes));
 
-    // Send request to read holding registers
-    result = MYRIOTA_ModbusReadInputRegisters(
-        handle,
-        slave,
-        addr,
-        2,
-        response_bytes);
-    // result = MYRIOTA_ModbusWrite(handle, slave, addr, request_bytes, sizeof(request_bytes));
+    result = MYRIOTA_ModbusReadInputRegisters(handle, slave, addr, 2, response_bytes);
     if (result != MODBUS_SUCCESS)
     {
       printf("Sensor Request Failed: %d\n", result);
       continue;
     }
-    else
-    {
-      printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
-    }
+    printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
 
-    // skip first empty result, for the case if sensor hasnt initialized yet
-    if (retries == 0 && result == MODBUS_SUCCESS && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
+    if (retries == 0 && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
     {
       printf("Skipping first zero result\n");
       result = MODBUS_ERROR_IO_FAILURE;
@@ -100,10 +144,13 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
     }
 
     int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
-    *temperature = (float)temp_raw / 10.0f;
+    if (temperature)
+      *temperature = (float)temp_raw / 10.0f;
     break;
   }
 
+  if (result != MODBUS_SUCCESS && temperature)
+    *temperature = MODBUS_TEMPERATURE_INVALID;
   return result;
 }
 
@@ -142,11 +189,13 @@ int Modbus_Init()
 
 int Modbus_Deinit()
 {
-  int ret = MYRIOTA_ModbusDisable(application_context.modbus_handle);
+  MYRIOTA_ModbusHandle h = application_context.modbus_handle;
+  if (h <= 0)
+    return 0;
+  int ret = MYRIOTA_ModbusDisable(h);
   if (ret)
-  {
     printf("Failed to disable Modbus: %d\n", ret);
-    return ret;
-  }
-  return 0;
+  MYRIOTA_ModbusDeinit(h);
+  application_context.modbus_handle = 0;
+  return ret;
 }

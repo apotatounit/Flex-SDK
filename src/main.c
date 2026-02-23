@@ -23,6 +23,8 @@
 
 #define ENABLE_TRANSMIT 1
 #define ENABLE_MODBUS 1
+/** Set to 1 to scan Modbus slaves 0x01..0x0F after init and print which address has a temperature sensor. */
+#define MODBUS_SCAN_AFTER_INIT 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
 #define LED_BLINK_DELAY 200      // ms
 
@@ -75,23 +77,18 @@ static uint16_t GetPulseRate(void);
 // Simulated functions for temperature, pressure, and flow meter
 static ReadResult ReadTemperatureSensor(void)
 {
-  // Replace with actual temperature sensor reading logic
-  float temperature; // Simulated temperature reading
+  float temperature = MODBUS_TEMPERATURE_INVALID;
   int result = 0;
   if (ENABLE_MODBUS)
   {
     result = Modbus_Request_Receive_Temperature(&temperature);
+    if (result)
+      printf("Failed to Read Temperature from Modbus sensor (result=%d).\r\n", result);
   }
   else
   {
-    // Simulate a successful read
-    temperature = 25.0; // Simulated temperature reading
+    temperature = 25.0f;
     result = 0;
-  }
-  // Modbus_Request_Receive_Temperature(&temperature);
-  if (result)
-  {
-    printf("Failed to Read Temperature from Modbus sensor.\r\n");
   }
   ReadResult read_result = {result, temperature};
   return read_result;
@@ -221,7 +218,10 @@ static SensorMeasurements CollectSensorData(void)
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
 
-    printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
+    if (isnan(temperature))
+      printf(">temperature: N/A °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", pressure, pulse_count, pulse_rate);
+    else
+      printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
 
     if (DATA_COLLECTION_INTERVAL_MS > 2 * LED_BLINK_DELAY)
     {
@@ -256,7 +256,10 @@ static SensorMeasurements CollectSensorData(void)
   uint32_t pulses_per_minute = (uint32_t)(flow_data.pulse_count * (60000.0 / flow_data.elapsed_time_ms));
 
   // Print results
-  printf("Average Temperature: %.1f °C\r\n", avg_temperature);
+  if (sum_counter_temp)
+    printf("Average Temperature: %.1f °C\r\n", avg_temperature);
+  else
+    printf("Average Temperature: N/A (no valid Modbus reads)\r\n");
   printf("Average AIN: %.3f V\r\n", avg_pressure_ain);
   printf("Average Pressure: %.3f bar\r\n", avg_pressure);
   printf("Pulse Rate: %.2ld pulses/min\r\n", pulses_per_minute);
@@ -307,15 +310,23 @@ static int InitSensors(void)
     printf("Analog Input initialised.\r\n");
   }
 
-  if (ENABLE_MODBUS && bInitModbusRequired && Modbus_Init() != 0)
+  if (ENABLE_MODBUS && bInitModbusRequired)
   {
-    printf("Failed to Init Modbus.\r\n");
-    // return -1;
-  }
-  else
-  {
-    bInitModbusRequired = false;
-    printf("Modbus initialised.\r\n");
+    if (Modbus_Init() != 0)
+      printf("Failed to Init Modbus.\r\n");
+    else
+    {
+      bInitModbusRequired = false;
+      printf("Modbus initialised.\r\n");
+#if MODBUS_SCAN_AFTER_INIT
+      {
+        uint8_t slave = 0;
+        float scan_temp = MODBUS_TEMPERATURE_INVALID;
+        if (Modbus_ScanForTemperatureSensor(&slave, &scan_temp) == 0)
+          printf("Modbus temperature sensor at slave 0x%02X\r\n", (unsigned)slave);
+      }
+#endif
+    }
   }
 
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
@@ -329,11 +340,14 @@ static int InitSensors(void)
 
 static void DeinitSensors(void)
 {
-  // Deinit sensors
+  if (ENABLE_MODBUS)
+  {
+    Modbus_Deinit();
+    bInitModbusRequired = true;
+  }
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
   FLEX_PulseCounterDeinit();
-  // Modbus_Deinit();
 }
 
 // function to blink LED n times, defined by argument
