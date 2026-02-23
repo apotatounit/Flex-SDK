@@ -19,8 +19,8 @@
 
 // Stability criteria
 #define ANALOG_STD_DEV_THRESHOLD_MV 10    // Readings stable if std dev < 10mV
-#define ANALOG_TARGET_VOLTAGE_V 1.0
-#define ANALOG_TARGET_TOLERANCE_V 0.05    // Within 50mV of target (0.95V - 1.05V)
+#define ANALOG_TARGET_VOLTAGE_V 1.0f
+#define ANALOG_TARGET_TOLERANCE_V 0.05f    // Within 50mV of target (0.95V - 1.05V)
 
 // Sensor configuration
 #define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
