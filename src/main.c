@@ -178,6 +178,8 @@ static uint32_t TestPulsePowerUpDelay(void)
   {
     printf("RESULT: No reliable delay found in range\r\n");
   }
+
+  return min_reliable_delay;
 }
 
 static void TestPulseReadingFrequency(uint32_t min_powerup_delay)
@@ -500,9 +502,9 @@ static uint32_t TestModbusPowerUpDelay(void)
       }
       read_duration = GetTickMs() - read_start;
 
-      uint32_t deinit_start = GetTickMs();
+      // uint32_t deinit_start = GetTickMs();
       int deinit_result = Modbus_Deinit();
-      uint32_t deinit_duration = GetTickMs() - deinit_start;
+      // uint32_t deinit_duration = GetTickMs() - deinit_start;
       (void)deinit_result; // Track but don't fail on deinit
     }
 
@@ -599,8 +601,8 @@ static void TestModbusReadingFrequency(uint32_t min_powerup_delay)
       avg_duration /= success_count;
     }
 
-    printf("MODBUS_FREQ: ts=%lu, delay=%lu, success=%u/%d, rate=%.1f%%, avg_temp=%.1f°C, avg_duration=%lu, alive=%s\r\n",
-           GetTickMs(), delay, success_count, MODBUS_READ_ITERATIONS, success_rate, avg_temp, avg_duration, alive ? "yes" : "no");
+    printf("MODBUS_FREQ: ts=%lu, delay=%lu, success=%lu/%d, rate=%.1f%%, avg_temp=%.1f°C, avg_duration=%lu, alive=%s\r\n",
+        GetTickMs(), delay, (unsigned long)success_count, MODBUS_READ_ITERATIONS, success_rate, avg_temp, avg_duration, alive ? "yes" : "no");
 
     if (alive && (success_rate >= MODBUS_SUCCESS_RATE_THRESHOLD) && delay < min_reliable_delay)
     {
