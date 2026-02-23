@@ -1,4 +1,3 @@
-option('examples', type : 'boolean', value : 'true', description : 'Compiles flex-sdk examples')
 option('skip_gnss', type : 'boolean', value : false,
         description: 'Disable GNSS sync task and use default location',
         yield: true

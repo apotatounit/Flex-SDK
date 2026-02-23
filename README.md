@@ -191,11 +191,7 @@ meson compile -C build
 
 > [!IMPORTANT]
 > After building the source, the compiled user application will be available
-> under the `build/` directory as `user_application.bin`. You can also find
-> compiled versions of examples under `build/examples/`.
-
-> [!NOTE]
-> You can find the source code of the examples in the `examples` directory.
+> under the `build/` directory as `user_application.bin`.
 
 ### 3. Pristine Build
 To perform a pristine build, delete the `build` folder before running the
@@ -363,9 +359,7 @@ This section guides you through using a [Nordic Power Profiler Kit II (PPK2)](ht
 - [nRF Connect for Desktop](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop) + Power Profiler App (downloaded from within nRF Connect for Desktop)
 
 ### How to Measure Current Draw
-The following is the wiring diagram to perform the current draw measurement using a PPK2.
-
-![Wiring Diagram](docs/images/WiringDiagram.png)
+Use a PPK2 (or similar) to measure current draw. See the Myriota support site for wiring details.
 
 > [!IMPORTANT]
 > Double-check polarity. Reversed polarity may damage your FlexSense device.

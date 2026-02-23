@@ -74,7 +74,4 @@ else
       command: [python, post_process_elf, '@INPUT@', '@OUTPUT0@', '@OUTPUT1@', '@OUTPUT2@' ],
   )
 
-  if get_option('examples')
-    subdir('examples')
-  endif
 endif
