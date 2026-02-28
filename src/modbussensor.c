@@ -22,19 +22,25 @@ static void serial_deinit(void *const ctx)
   FLEX_SerialDeinit();
 }
 
-/* Read up to count bytes; blocks until count bytes or rx_timeout_ticks elapsed (then returns bytes read). */
+/* Inter-byte timeout: after at least one byte received, if no further byte within this many ticks,
+ * treat frame as complete and return (Modbus RTU frame end). 1000 ticks = 1 s. */
+#define INTER_BYTE_TIMEOUT_TICKS  100u   /* ~100 ms; 3.5 char time at 4800 baud is ~8 ms */
+
+/* Read up to count bytes; blocks until count bytes, inter-byte timeout (frame end), or rx_timeout_ticks elapsed. */
 static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t count)
 {
   SerialContext *const serial = ctx;
 
   uint8_t *curr = buffer;
   const uint8_t *const end = buffer + count;
-  const uint32_t end_ticks = FLEX_TickGet() + serial->rx_timeout_ticks;
-  while (FLEX_TickGet() <= end_ticks)
+  const uint32_t total_end_ticks = FLEX_TickGet() + serial->rx_timeout_ticks;
+  uint32_t next_byte_end_ticks = total_end_ticks;  /* first byte: use full timeout */
+
+  while (FLEX_TickGet() <= total_end_ticks)
   {
     if (curr >= end)
     {
-      return -1;
+      return (ssize_t)(curr - buffer);
     }
 
     int num_bytes = FLEX_SerialRead(curr, 1);
@@ -45,10 +51,20 @@ static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t 
     if (num_bytes == 1)
     {
       ++curr;
+      /* After at least one byte, use short inter-byte timeout so we return as soon as frame ends */
+      next_byte_end_ticks = FLEX_TickGet() + INTER_BYTE_TIMEOUT_TICKS;
+    }
+    else
+    {
+      /* No byte this time; if we have data and past inter-byte window, frame complete */
+      if (curr > buffer && FLEX_TickGet() > next_byte_end_ticks)
+      {
+        return (ssize_t)(curr - buffer);
+      }
     }
   }
 
-  return curr - buffer;
+  return (ssize_t)(curr - buffer);
 }
 
 static ssize_t serial_write(void *const ctx, const uint8_t *const buffer, const size_t count)
