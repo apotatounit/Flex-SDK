@@ -132,14 +132,14 @@ static time_t RunModbusRxTimeoutTest(void)
       }
       if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
       {
-        printf("  [%zu/%zu] settle %u delay %u: PowerOutInit failed\r\n", phase2_count, total_phase2, settle_ms, read_delay_ms);
+        printf("  [%lu/%lu] settle %u delay %u: PowerOutInit failed\r\n", (unsigned long)phase2_count, (unsigned long)total_phase2, settle_ms, read_delay_ms);
         continue;
       }
       uint32_t t_power = FLEX_TickGet();
       FLEX_DelayMs(settle_ms);
       if (Modbus_Init() != 0)
       {
-        printf("  [%zu/%zu] settle %u delay %u: Modbus_Init failed\r\n", phase2_count, total_phase2, settle_ms, read_delay_ms);
+        printf("  [%lu/%lu] settle %u delay %u: Modbus_Init failed\r\n", (unsigned long)phase2_count, (unsigned long)total_phase2, settle_ms, read_delay_ms);
         FLEX_PowerOutDeinit();
         continue;
       }
@@ -169,12 +169,12 @@ static time_t RunModbusRxTimeoutTest(void)
 
       /* Progress: result and time from power-up so we see settle < 2100 still getting real after N reads */
       if (first_ok != 0u)
-        printf("  [%zu/%zu] settle %4u ms delay %3u ms: first non-zero at read %u, %lu ms from power-up\r\n",
-               phase2_count, total_phase2, settle_ms, read_delay_ms, first_ok,
+        printf("  [%lu/%lu] settle %4u ms delay %3u ms: first non-zero at read %u, %lu ms from power-up\r\n",
+               (unsigned long)phase2_count, (unsigned long)total_phase2, settle_ms, read_delay_ms, first_ok,
                (unsigned long)(t_done - t_power));
       else
-        printf("  [%zu/%zu] settle %4u ms delay %3u ms: no non-zero in 5 reads\r\n",
-               phase2_count, total_phase2, settle_ms, read_delay_ms);
+        printf("  [%lu/%lu] settle %4u ms delay %3u ms: no non-zero in 5 reads\r\n",
+               (unsigned long)phase2_count, (unsigned long)total_phase2, settle_ms, read_delay_ms);
     }
   }
 
