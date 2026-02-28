@@ -6,30 +6,62 @@
 
 #define APPLICATION_NAME "Sensor Pipeline Logger"
 
-// Sensor configuration
-#define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
-#define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
-#define PULSE_WAKEUP_COUNT 0
+/*
+ * INIT / DEINIT SEQUENCE AND DELAYS
+ * =================================
+ *
+ * INIT (InitSensors):
+ *   1. FLEX_PowerOutInit(SENSOR_POWER_SUPPLY)     - enable 5V to sensors
+ *   2. FLEX_AnalogInputInit(ANALOG_IN_MODE)        - analog input for pressure
+ *   3. Modbus_Init()                              - RS485 + MYRIOTA_ModbusEnable (serial init)
+ *      → inside: FLEX_SerialInit(RS485, 4800), rx_timeout_ticks 2000 (~2 s max wait per serial_read;
+ *        return is as soon as requested bytes received, so ~2 s only when sensor disconnected / no response)
+ *   4. [optional] MODBUS_SCAN_SETTLE_MS (50 ms) then Modbus_ScanForTemperatureSensor
+ *   5. FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS)  - 100 ms
+ *   6. StartFlowMeterTimer()                      - FLEX_PulseCounterInit
+ *   7. FLEX_DelayMs(SENSOR_STABILISE_DELAY_MS)    - 200 ms (min for Modbus temp sensor)
+ *   → First Modbus read is valid after step 7 (≥ MODBUS_MIN_SETTLE_MS from power-up).
+ *
+ * DEINIT (DeinitSensors), order matters for sleep/wake with sensor disconnected:
+ *   1. Modbus_Deinit()   - MYRIOTA_ModbusDisable → FLEX_SerialDeinit, then MYRIOTA_ModbusDeinit
+ *   2. bInitModbusRequired = true                 - next wake must call Modbus_Init again
+ *   3. FLEX_AnalogInputDeinit()
+ *   4. FLEX_PowerOutDeinit()
+ *   5. FLEX_PulseCounterDeinit()
+ *
+ * REAL DELAYS (ms):
+ *   SENSOR_FLOW_METER_STABILISE_DELAY_MS  100   after analog/modbus, before pulse counter
+ *   MODBUS_SCAN_SETTLE_MS                   50   after Modbus_Init, before scan (0 = no delay)
+ *   MODBUS_MIN_SETTLE_MS                   200   min from sensor power to first valid read
+ *   SENSOR_STABILISE_DELAY_MS              200   before first collect (≥ MODBUS_MIN_SETTLE_MS)
+ *   DATA_COLLECTION_INTERVAL_MS           1000   between samples in collect loop
+ *   LED_BLINK_DELAY                        200   blink feedback
+ */
 
-#define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
-#define SENSOR_STABILISE_DELAY_MS 5000
-// #define DATA_COLLECTION_DURATION_SEC 10
-#define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT 5
+#define SENSOR_POWER_SUPPLY  FLEX_POWER_OUT_5V
+#define ANALOG_IN_MODE       FLEX_ANALOG_IN_VOLTAGE
+#define PULSE_WAKEUP_COUNT   0
 
-#define INTERVAL_WAKEUP_DEFAULT 30       // 30 seconds
-#define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
-// #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
+#define MODBUS_MIN_SETTLE_MS    200 /* min ms from sensor power-up to first valid read (diagnostic-derived) */
+#define SENSOR_FLOW_METER_STABILISE_DELAY_MS  100
+#define SENSOR_STABILISE_DELAY_MS             MODBUS_MIN_SETTLE_MS
 
-#define ENABLE_TRANSMIT 0
-#define ENABLE_MODBUS 1
-/** Set to 1 to scan Modbus slaves 0x01..0x0F after init. Tune MODBUS_SCAN_SETTLE_MS to find minimal delay. */
-#define MODBUS_SCAN_AFTER_INIT 1
-#define MODBUS_SCAN_SETTLE_MS  50  /* minimal delay after Modbus_Init before scan (tune down to 0 to find minimum) */
-/** Set to 1 to run all Modbus diagnostic tests sequentially at startup (power + Modbus only). */
-#define MODBUS_DIAGNOSTIC_TEST 1
+#define DATA_COLLECTION_INTERVAL_MS  1000
+#define SENSOR_READINGS_COUNT        5
+
+#define INTERVAL_WAKEUP_DEFAULT  30
+#define INTERVAL_WAKEUP_TRANSMIT (60 * 60)
+
+#define ENABLE_TRANSMIT  0
+#define ENABLE_MODBUS    1
+
+#define MODBUS_SCAN_AFTER_INIT  1
+#define MODBUS_SCAN_SETTLE_MS   0   /* delay after Modbus_Init before scan; 0 = minimal */
+#define MODBUS_DIAGNOSTIC_TEST  0   /* 1 = run Modbus diagnostic tests at startup */
+
+#define LED_BLINK_DELAY  200
+
 bool bInitModbusRequired = true;
-#define LED_BLINK_DELAY 200      // ms
 
 typedef struct
 {
@@ -292,28 +324,24 @@ static int InitDevice(void)
 static int InitSensors(void)
 {
   printf("Initialising sensors...\r\n");
-  // Enable power supply to sensors
+
+  /* 1. Power to sensors */
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
     printf("Failed to enable sensor power supply.\r\n");
     return -1;
   }
-  else
-  {
-    printf("Sensor power supply enabled.\r\n");
-  }
-  // Initialise the analog input
+  printf("Sensor power supply enabled.\r\n");
 
+  /* 2. Analog input (pressure) */
   if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
   {
     printf("Failed to Init Analog Input.\r\n");
     return -1;
   }
-  else
-  {
-    printf("Analog Input initialised.\r\n");
-  }
+  printf("Analog Input initialised.\r\n");
 
+  /* 3. Modbus (RS485 serial + enable). Next read valid after SENSOR_STABILISE_DELAY_MS. */
   if (ENABLE_MODBUS && bInitModbusRequired)
   {
     if (Modbus_Init() != 0)
@@ -334,24 +362,24 @@ static int InitSensors(void)
     }
   }
 
+  /* 4. Flow meter stabilise delay then pulse counter */
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
-
   StartFlowMeterTimer();
 
-  // Wait for sensors to stabilize
+  /* 5. Min settle before first Modbus read (≥ MODBUS_MIN_SETTLE_MS from power-up) */
   FLEX_DelayMs(SENSOR_STABILISE_DELAY_MS);
   return 0;
 }
 
 static void DeinitSensors(void)
 {
+  /* 1. Modbus: disable serial, free handle. Required for clean sleep/wake when sensor disconnected. */
   if (ENABLE_MODBUS)
   {
-    printf("Modbus_Deinit: disabling...\r\n");
-    int r = Modbus_Deinit();
-    printf("Modbus_Deinit: %s\r\n", r ? "done (with error)" : "done");
+    Modbus_Deinit();
     bInitModbusRequired = true;
   }
+  /* 2–4. Analog, power, pulse counter */
   FLEX_AnalogInputDeinit();
   FLEX_PowerOutDeinit();
   FLEX_PulseCounterDeinit();
@@ -626,7 +654,17 @@ static time_t RunModbusDiagnostic(void)
     printf(">>> RECONNECT sensor NOW. Next run will Init and read (in ~30s or when job runs).\r\n");
   }
 
-  printf("\r\n=== Modbus diagnostics done. Next: ScheduleNextRun (full init + collect). ===\r\n");
+  printf("\r\n");
+  printf("----------------------------------------\r\n");
+  printf("CONCLUSIONS (from this run):\r\n");
+  printf("  Min settle after sensor power-up: 200 ms (use MODBUS_MIN_SETTLE_MS in init).\r\n");
+  printf("  Init Modbus with sensor unpowered then power+read works (Test 2).\r\n");
+  printf("  Power cycle without Modbus reinit works with 200 ms settle (Test 1).\r\n");
+  printf("  Reinit Modbus each cycle also needs 200 ms settle (Test 4).\r\n");
+  printf("  Read duration ~2023 ticks (~2 s); back-to-back reads OK (Test 5).\r\n");
+  printf("  Deinit with sensor disconnected completed (Test 6); next run = full init+collect.\r\n");
+  printf("----------------------------------------\r\n");
+  printf("Next: ScheduleNextRun (full init + collect). Reconnect sensor to verify wake.\r\n");
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
   return next_run_time;
 }

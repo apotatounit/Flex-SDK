@@ -1,7 +1,15 @@
+/*
+ * Modbus RTU over RS485 (4800 baud). Temperature from input register 0x0001 (tenths °C).
+ *
+ * Modbus_Init: MYRIOTA_ModbusInit → MYRIOTA_ModbusEnable (calls serial_init → FLEX_SerialInit).
+ * Modbus_Deinit: MYRIOTA_ModbusDisable (calls serial_deinit → FLEX_SerialDeinit) → MYRIOTA_ModbusDeinit.
+ * serial_read: byte-by-byte read with rx_timeout_ticks (~2 s) total timeout.
+ */
 #include "modbussensor.h"
 
 static ApplicationContext application_context = {0};
 
+/* Serial callbacks used by MYRIOTA Modbus stack */
 static int serial_init(void *const ctx)
 {
   SerialContext *const serial = ctx;
@@ -14,6 +22,7 @@ static void serial_deinit(void *const ctx)
   FLEX_SerialDeinit();
 }
 
+/* Read up to count bytes; blocks until count bytes or rx_timeout_ticks elapsed (then returns bytes read). */
 static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t count)
 {
   SerialContext *const serial = ctx;
@@ -155,11 +164,12 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
   return result;
 }
 
+/** Init: create Modbus handle, then enable serial (FLEX_SerialInit). Caller must wait ≥ MODBUS_MIN_SETTLE_MS after power-up before first read. */
 int Modbus_Init()
 {
   application_context.serial_context.protocol = FLEX_SERIAL_PROTOCOL_RS485;
   application_context.serial_context.baud_rate = 4800;
-  application_context.serial_context.rx_timeout_ticks = 2000;
+  application_context.serial_context.rx_timeout_ticks = 2000; /* ~2 s total read timeout */
 
   const MYRIOTA_ModbusInitOptions options = {
       .framing_mode = MODBUS_FRAMING_MODE_RTU,
@@ -191,14 +201,12 @@ int Modbus_Init()
   return 0;
 }
 
+/** Deinit: disable serial (FLEX_SerialDeinit), then free Modbus handle. Required before sleep when sensor may be disconnected. */
 int Modbus_Deinit()
 {
   MYRIOTA_ModbusHandle h = application_context.modbus_handle;
   if (h <= 0)
-  {
-    printf("Modbus_Deinit: no handle (already deinit)\n");
     return 0;
-  }
   int ret = MYRIOTA_ModbusDisable(h);
   if (ret)
     printf("Modbus_Deinit: ModbusDisable failed %d (serial may be disconnected)\n", ret);
