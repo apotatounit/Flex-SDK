@@ -23,8 +23,9 @@ static void serial_deinit(void *const ctx)
 }
 
 /* Inter-byte timeout: after at least one byte received, if no further byte within this many ticks,
- * treat frame as complete and return (Modbus RTU frame end). 1000 ticks = 1 s. */
-#define INTER_BYTE_TIMEOUT_TICKS  100u   /* ~100 ms; 3.5 char time at 4800 baud is ~8 ms */
+ * treat frame as complete and return (Modbus RTU frame end). 1000 ticks = 1 s.
+ * Modbus RTU 3.5 char time at 4800 baud ≈ 8 ms; use 50 ms to avoid truncating slow sensors. */
+#define INTER_BYTE_TIMEOUT_TICKS  50u
 
 /* Read up to count bytes; blocks until count bytes, inter-byte timeout (frame end), or rx_timeout_ticks elapsed. */
 static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t count)
@@ -178,6 +179,28 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
   if (result != MODBUS_SUCCESS && temperature)
     *temperature = MODBUS_TEMPERATURE_INVALID;
   return result;
+}
+
+int Modbus_ReadTemperature_FirstAttemptOnly(float *const temperature)
+{
+  const MYRIOTA_ModbusHandle handle = application_context.modbus_handle;
+  if (temperature)
+    *temperature = MODBUS_TEMPERATURE_INVALID;
+  if (handle <= 0)
+    return -MODBUS_ERROR_INVALID_HANDLE;
+
+  uint8_t response_bytes[4] = {0};
+  const MYRIOTA_ModbusDeviceAddress slave = 0x01;
+  const MYRIOTA_ModbusDataAddress addr = MODBUS_TEMP_REG_ADDR;
+
+  int result = MYRIOTA_ModbusReadInputRegisters(handle, slave, addr, 2, response_bytes);
+  if (result != MODBUS_SUCCESS)
+    return result;
+  /* Accept 00 00 as 0.0 °C (no "skip first zero" - for settle calibration) */
+  int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
+  if (temperature)
+    *temperature = (float)temp_raw / 10.0f;
+  return MODBUS_SUCCESS;
 }
 
 /** Init: create Modbus handle, then enable serial (FLEX_SerialInit). Caller must wait ≥ MODBUS_MIN_SETTLE_MS after power-up before first read. */

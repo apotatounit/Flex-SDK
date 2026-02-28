@@ -41,5 +41,8 @@ int Modbus_Deinit(void);
  *  \return 0 if a device was found and read, -1 otherwise. */
 int Modbus_ScanForTemperatureSensor(uint8_t *out_slave_addr, float *out_temperature);
 int Modbus_Request_Receive_Temperature(float *const temperature);
+/** Single attempt only (no retries). Use for settle calibration: 00 00 accepted as 0.0 °C.
+ *  \return 0 on success, negative on error. */
+int Modbus_ReadTemperature_FirstAttemptOnly(float *const temperature);
 
 #endif // MODBUSSENSOR_H
