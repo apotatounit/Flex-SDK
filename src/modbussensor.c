@@ -22,10 +22,10 @@ static void serial_deinit(void *const ctx)
   FLEX_SerialDeinit();
 }
 
-/* Inter-byte timeout: after at least one byte received, if no further byte within this many ticks,
- * treat frame as complete and return (Modbus RTU frame end). 1000 ticks = 1 s.
- * Modbus RTU 3.5 char time at 4800 baud ≈ 8 ms; use 50 ms to avoid truncating slow sensors. */
-#define INTER_BYTE_TIMEOUT_TICKS  50u
+/* Inter-byte timeout: after at least MIN_BYTES_BEFORE_INTER_BYTE received, if no further byte
+ * within this many ticks, treat frame as complete. 1000 ticks = 1 s. */
+#define INTER_BYTE_TIMEOUT_TICKS      100u   /* ~100 ms after last byte */
+#define MIN_BYTES_BEFORE_INTER_BYTE  9u      /* full Read Input Registers response = 9 bytes; avoids returning on 8-byte TX echo */
 
 /* Read up to count bytes; blocks until count bytes, inter-byte timeout (frame end), or rx_timeout_ticks elapsed. */
 static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t count)
@@ -35,7 +35,7 @@ static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t 
   uint8_t *curr = buffer;
   const uint8_t *const end = buffer + count;
   const uint32_t total_end_ticks = FLEX_TickGet() + serial->rx_timeout_ticks;
-  uint32_t next_byte_end_ticks = total_end_ticks;  /* first byte: use full timeout */
+  uint32_t next_byte_end_ticks = total_end_ticks;
 
   while (FLEX_TickGet() <= total_end_ticks)
   {
@@ -52,13 +52,15 @@ static ssize_t serial_read(void *const ctx, uint8_t *const buffer, const size_t 
     if (num_bytes == 1)
     {
       ++curr;
-      /* After at least one byte, use short inter-byte timeout so we return as soon as frame ends */
-      next_byte_end_ticks = FLEX_TickGet() + INTER_BYTE_TIMEOUT_TICKS;
+      /* Only use short inter-byte timeout once we have a full response (avoid returning on TX echo). */
+      if ((size_t)(curr - buffer) >= MIN_BYTES_BEFORE_INTER_BYTE)
+      {
+        next_byte_end_ticks = FLEX_TickGet() + INTER_BYTE_TIMEOUT_TICKS;
+      }
     }
     else
     {
-      /* No byte this time; if we have data and past inter-byte window, frame complete */
-      if (curr > buffer && FLEX_TickGet() > next_byte_end_ticks)
+      if ((size_t)(curr - buffer) >= MIN_BYTES_BEFORE_INTER_BYTE && FLEX_TickGet() > next_byte_end_ticks)
       {
         return (ssize_t)(curr - buffer);
       }
