@@ -41,7 +41,7 @@ Use a minimal build that runs **only** Modbus read timing, with clear prompts so
 
 ### Procedure
 
-1. **Build** with `MODBUS_RX_TIMEOUT_TEST 1` (or run the existing “Single read” / “Test 5” style path that prints one read duration).
+1. **Build** with `MODBUS_RX_TIMEOUT_TEST 1`: use meson `-Dmodbus_rx_timeout_test=true` or set the define in `src/main.c`.
 2. **Flash** and open serial console (e.g. `./flash-and-listen.sh /dev/cu.usbmodem1101`).
 3. **Test 1 – Connected**  
    - Connect sensor (cable in, powered by board).  

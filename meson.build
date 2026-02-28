@@ -53,10 +53,14 @@ else
     'src/modbussensor.c'
   ]
 
+  modbus_rx_timeout_test = get_option('modbus_rx_timeout_test')
+  c_args = modbus_rx_timeout_test ? ['-DMODBUS_RX_TIMEOUT_TEST=1'] : []
+
   # Create the user_application as an ELF
   user_application_elf = executable('user_application',
     c_files,
     name_suffix: 'elf',
+    c_args: c_args,
     dependencies: [
       libflex_dep
     ] + flex_sdk_lib_deps,

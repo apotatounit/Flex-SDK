@@ -10,3 +10,7 @@ option('cold_start', type : 'boolean', value : false,
         description: 'Build the merge applications binary with cold start network information',
         yield: true
 )
+option('modbus_rx_timeout_test', type : 'boolean', value : false,
+        description: 'Build firmware that runs only Modbus RX timeout test (one read + duration). See doc/modbus-rx-timeout-spec.md',
+        yield: true
+)
