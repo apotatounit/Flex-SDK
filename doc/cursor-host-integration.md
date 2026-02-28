@@ -73,5 +73,6 @@ To have the agent iterate (build, flash, read output, change code, repeat until 
 4. Agent suggests code changes; you apply them (or switch to Agent mode to apply).  
 5. Run the script again; repeat until the output meets your criteria.
 
-**Option B – Agent runs the cycle (when host terminal is used)**  
-If Cursor runs the agent’s commands in your host terminal (e.g. you approved “Run” or enabled Legacy Terminal), the agent can run `./autonomous-build-flash-capture.sh` itself, then read `serial_capture.txt`, decide if done (e.g. “stable=yes” or “RESULT: Minimum reliable”), and either stop or edit code and run again. Non-interactive push uses `COMMIT_MSG` (set by the script) so no commit prompt.
+**Option B – Agent runs the cycle with no intervention (requires host terminal)**  
+For the agent to run build → flash → capture → evaluate → edit → repeat **without you doing anything**, Cursor must run the agent’s terminal commands in your **host** shell (same one where `gh` and `ssh-add` work). If the agent’s commands run in a sandbox or another environment, the Codespace SSH step will always fail with “Permission denied (publickey)”.  
+When host terminal is active, the agent can run `./autonomous-build-flash-capture.sh --push /dev/cu.usbmodem1101 90`, read `serial_capture.txt`, stop when output is good enough (e.g. “stable=yes”, “RESULT: Minimum reliable”) or after a few iterations, and edit code and re-run in between. Non-interactive push uses `COMMIT_MSG` so there is no commit prompt.
