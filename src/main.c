@@ -16,8 +16,8 @@
 #define NUM_READS            5u
 #define POWER_CYCLE_MS      300u   /* ms power off between calibration trials */
 
-/* Settle delays to try in calibration (ms from power-on to first read = settle + SERIAL_SETTLE_MS). */
-static const unsigned int SETTLE_CALIBRATION_MS[] = { 400, 500, 600, 700, 800, 1000 };
+/* Settle delays to try in calibration (ms from power-on to Modbus_Init). */
+static const unsigned int SETTLE_CALIBRATION_MS[] = { 400, 500, 600, 700, 800, 1000, 1200, 1500, 2000 };
 #define NUM_SETTLE_TRIALS    (sizeof(SETTLE_CALIBRATION_MS) / sizeof(SETTLE_CALIBRATION_MS[0]))
 
 static time_t RunModbusRxTimeoutTest(void)
