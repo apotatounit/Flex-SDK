@@ -14,11 +14,19 @@
 #define POWER_SETTLE_MS      800u   /* ms after power-on before Modbus_Init (sensor stabilise); tune via calibration */
 #define SERIAL_SETTLE_MS     150u   /* ms after Modbus_Init before first read */
 #define NUM_READS            5u
+#define MAX_ATTEMPTS         5u     /* max single-attempt reads per (settle, delay) in calibration */
 #define POWER_CYCLE_MS      300u   /* ms power off between calibration trials */
 
-/* Settle delays to try in calibration (ms from power-on to Modbus_Init). */
-static const unsigned int SETTLE_CALIBRATION_MS[] = { 400, 500, 600, 700, 800, 1000, 1200, 1500, 2000 };
+/* Settle range: 2000 ± 1000 ms, step 100 ms → 1000..3000 (21 values). */
+static const unsigned int SETTLE_CALIBRATION_MS[] = {
+  1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000,
+  2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000
+};
 #define NUM_SETTLE_TRIALS    (sizeof(SETTLE_CALIBRATION_MS) / sizeof(SETTLE_CALIBRATION_MS[0]))
+
+/* Read delay (ms) between consecutive read attempts in calibration. */
+static const unsigned int READ_DELAY_MS[] = { 0, 50, 100, 200 };
+#define NUM_READ_DELAYS      (sizeof(READ_DELAY_MS) / sizeof(READ_DELAY_MS[0]))
 
 static time_t RunModbusRxTimeoutTest(void)
 {
@@ -87,47 +95,113 @@ static time_t RunModbusRxTimeoutTest(void)
   else
     printf("All first responses 0.0 °C or fail -> use skip-first-then-read.\r\n");
 
-  /* Phase 2: Minimal settle with "skip first, then read" (second read only). */
-  printf("\r\n--- Minimal settle (skip first response, then read) ---\r\n");
+  /*
+   * Phase 2: For each (settle, read_delay), do up to 5 single-attempt reads with
+   * read_delay ms between them. Record which read (1..5) first returns non-zero.
+   * This distinguishes: settle-driven (longer settle -> non-zero sooner) vs
+   * attempt-driven (non-zero after N reads regardless of settle).
+   * result[settle_idx][delay_idx] = first non-zero at read 1..5, or 0.
+   */
+  printf("\r\n--- Settle vs read delay: first non-zero at attempt (1..5) ---\r\n");
+  printf("Settle 1000..3000 step 100 ms; read delay 0, 50, 100, 200 ms; up to 5 reads each.\r\n");
+
   unsigned int minimal_settle_ms = 0u;
+  /* first_nonzero[settle_idx][delay_idx] = 1..5 or 0 */
+  unsigned int first_nonzero[NUM_SETTLE_TRIALS][NUM_READ_DELAYS];
+  for (size_t s = 0; s < NUM_SETTLE_TRIALS; s++)
+    for (size_t d = 0; d < NUM_READ_DELAYS; d++)
+      first_nonzero[s][d] = 0u;
 
-  for (size_t i = 0; i < NUM_SETTLE_TRIALS; i++)
+  for (size_t s = 0; s < NUM_SETTLE_TRIALS; s++)
   {
-    unsigned int settle_ms = SETTLE_CALIBRATION_MS[i];
-    if (i > 0)
+    unsigned int settle_ms = SETTLE_CALIBRATION_MS[s];
+    for (size_t d = 0; d < NUM_READ_DELAYS; d++)
     {
-      FLEX_PowerOutDeinit();
-      FLEX_DelayMs(POWER_CYCLE_MS);
-    }
-    if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
-      continue;
-    FLEX_DelayMs(settle_ms);
-    if (Modbus_Init() != 0)
-    {
-      FLEX_PowerOutDeinit();
-      continue;
-    }
-    FLEX_DelayMs(SERIAL_SETTLE_MS);
-    /* Skip first (often 00 00) */
-    float discard = MODBUS_TEMPERATURE_INVALID;
-    (void)Modbus_ReadTemperature_FirstAttemptOnly(&discard);
-    /* Second read: real value? */
-    float t2 = MODBUS_TEMPERATURE_INVALID;
-    int r2 = Modbus_ReadTemperature_FirstAttemptOnly(&t2);
-    Modbus_Deinit();
-    FLEX_PowerOutDeinit();
+      unsigned int read_delay_ms = READ_DELAY_MS[d];
 
-    if (r2 == 0 && t2 != 0.0f && !isnan(t2))
-    {
-      printf("  settle %u ms: after skip-first, second read = %.1f °C [OK]\r\n", settle_ms, (double)t2);
-      if (minimal_settle_ms == 0u)
+      if (s > 0 || d > 0)
+      {
+        FLEX_PowerOutDeinit();
+        FLEX_DelayMs(POWER_CYCLE_MS);
+      }
+      if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
+      {
+        printf("  settle %u delay %u: PowerOutInit failed\r\n", settle_ms, read_delay_ms);
+        continue;
+      }
+      FLEX_DelayMs(settle_ms);
+      if (Modbus_Init() != 0)
+      {
+        printf("  settle %u delay %u: Modbus_Init failed\r\n", settle_ms, read_delay_ms);
+        FLEX_PowerOutDeinit();
+        continue;
+      }
+      FLEX_DelayMs(SERIAL_SETTLE_MS);
+
+      unsigned int first_ok = 0u;
+      for (unsigned int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)
+      {
+        float t = MODBUS_TEMPERATURE_INVALID;
+        int r = Modbus_ReadTemperature_FirstAttemptOnly(&t);
+        if (r == 0 && t != 0.0f && !isnan(t))
+        {
+          first_ok = attempt;
+          break;
+        }
+        if (attempt < MAX_ATTEMPTS)
+          FLEX_DelayMs(read_delay_ms);
+      }
+      first_nonzero[s][d] = first_ok;
+      Modbus_Deinit();
+      FLEX_PowerOutDeinit();
+
+      if (first_ok != 0u && minimal_settle_ms == 0u)
         minimal_settle_ms = settle_ms;
     }
   }
+
+  /* Print table: rows = settle, cols = read_delay, cell = first non-zero read # or "-" */
+  printf("\r\n        delay(ms): ");
+  for (size_t d = 0; d < NUM_READ_DELAYS; d++)
+    printf(" %4u", READ_DELAY_MS[d]);
+  printf("\r\n");
+  for (size_t s = 0; s < NUM_SETTLE_TRIALS; s++)
+  {
+    printf("settle %4u ms: ", SETTLE_CALIBRATION_MS[s]);
+    for (size_t d = 0; d < NUM_READ_DELAYS; d++)
+    {
+      unsigned int v = first_nonzero[s][d];
+      if (v != 0u)
+        printf("   %u ", v);
+      else
+        printf("   - ");
+    }
+    printf("\r\n");
+  }
+
+  /* Summary: minimal settle for which we get non-zero at read 1 (any delay), read 2, etc. */
+  printf("\r\n--- Summary (settle vs attempts) ---\r\n");
+  for (unsigned int at = 1; at <= MAX_ATTEMPTS; at++)
+  {
+    unsigned int min_settle = 0u;
+    for (size_t s = 0; s < NUM_SETTLE_TRIALS; s++)
+    {
+      for (size_t d = 0; d < NUM_READ_DELAYS; d++)
+        if (first_nonzero[s][d] == at)
+        {
+          min_settle = SETTLE_CALIBRATION_MS[s];
+          break;
+        }
+      if (min_settle != 0u)
+        break;
+    }
+    if (min_settle != 0u)
+      printf("  First non-zero at read %u: minimal settle = %u ms\r\n", at, min_settle);
+  }
   if (minimal_settle_ms != 0u)
-    printf("Minimal settle (skip first then read): %u ms\r\n", minimal_settle_ms);
+    printf("  Minimal settle (any delay, any attempt): %u ms\r\n", minimal_settle_ms);
   else
-    printf("Minimal settle: none found in range (skip first then read still 0.0/fail)\r\n");
+    printf("  No non-zero in 5 reads for any (settle, delay)\r\n");
 
   printf("\r\n--- Main test (settle = %u ms, %lu reads) ---\r\n", (unsigned)POWER_SETTLE_MS, (unsigned long)NUM_READS);
   printf("Starting in 2s...\r\n");

@@ -75,3 +75,17 @@ Use a minimal build that runs **only** Modbus read timing, with clear prompts so
   - **Inter-byte timeout** in `serial_read()`: after receiving a full frame (e.g. ≥ 9 bytes for Read Input Registers response), if no further byte arrives within a short window (e.g. 50–100 ms), return immediately instead of waiting for the full 2 s. This gives fast reads (~200–300 ms) once the sensor is responding.
   - **Minimum bytes before inter-byte**: Require at least 9 bytes (full response) before applying the short inter-byte timeout, so we do not return on 8-byte TX echo.
 - **Finding minimal values**: The RX timeout test firmware runs a **settle calibration** (several power-on-to-first-read delays) and **timed reads** with short timeouts. Use it to confirm: (1) connected reads complete in &lt; 2000 ticks; (2) disconnected reads hit the long timeout (~2000 ticks). Tune inter-byte timeout and settle within that behaviour.
+
+### Precise calibration: settle vs attempts
+
+To distinguish whether the change from 00 00 to real temperature is **settle-driven** (time after power-up) or **attempt-driven** (number of read attempts), the test runs:
+
+- **Settle range**: 2000 ± 1000 ms → 1000, 1100, …, 3000 ms (step 100 ms, 21 values).
+- **Read delay**: 0, 50, 100, 200 ms between consecutive single-attempt reads.
+- **Attempts**: Up to 5 single-attempt reads per (settle, read_delay) combination; no retries, 00 00 accepted as 0.0 °C.
+
+For each (settle, read_delay) the firmware records **which read (1..5)** first returns a non-zero temperature. Output is a table: rows = settle ms, columns = read delay ms, cell = first non-zero read # or "-". A summary reports minimal settle for "first non-zero at read 1", "at read 2", etc.
+
+- If longer settle alone gives non-zero at read 1 → behaviour is settle-driven.
+- If similar settle always needs N reads regardless of delay → behaviour is attempt-driven.
+- Varying read_delay shows whether extra delay between attempts helps (e.g. non-zero at read 2 with 100 ms delay vs read 3 with 0 ms).
