@@ -83,9 +83,51 @@ static time_t RunModbusRxTimeoutTest(void)
 
   printf("\r\n");
   if (best_nonzero)
-    printf("Use settle >= %u ms for real reading on first try.\r\n", best_settle_ms);
+    printf("First-try real reading: settle >= %u ms.\r\n", best_settle_ms);
   else
-    printf("All first responses were 0.0 °C or fail; try longer settle or check sensor.\r\n");
+    printf("All first responses 0.0 °C or fail -> use skip-first-then-read.\r\n");
+
+  /* Phase 2: Minimal settle with "skip first, then read" (second read only). */
+  printf("\r\n--- Minimal settle (skip first response, then read) ---\r\n");
+  unsigned int minimal_settle_ms = 0u;
+
+  for (size_t i = 0; i < NUM_SETTLE_TRIALS; i++)
+  {
+    unsigned int settle_ms = SETTLE_CALIBRATION_MS[i];
+    if (i > 0)
+    {
+      FLEX_PowerOutDeinit();
+      FLEX_DelayMs(POWER_CYCLE_MS);
+    }
+    if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
+      continue;
+    FLEX_DelayMs(settle_ms);
+    if (Modbus_Init() != 0)
+    {
+      FLEX_PowerOutDeinit();
+      continue;
+    }
+    FLEX_DelayMs(SERIAL_SETTLE_MS);
+    /* Skip first (often 00 00) */
+    float discard = MODBUS_TEMPERATURE_INVALID;
+    (void)Modbus_ReadTemperature_FirstAttemptOnly(&discard);
+    /* Second read: real value? */
+    float t2 = MODBUS_TEMPERATURE_INVALID;
+    int r2 = Modbus_ReadTemperature_FirstAttemptOnly(&t2);
+    Modbus_Deinit();
+    FLEX_PowerOutDeinit();
+
+    if (r2 == 0 && t2 != 0.0f && !isnan(t2))
+    {
+      printf("  settle %u ms: after skip-first, second read = %.1f °C [OK]\r\n", settle_ms, (double)t2);
+      if (minimal_settle_ms == 0u)
+        minimal_settle_ms = settle_ms;
+    }
+  }
+  if (minimal_settle_ms != 0u)
+    printf("Minimal settle (skip first then read): %u ms\r\n", minimal_settle_ms);
+  else
+    printf("Minimal settle: none found in range (skip first then read still 0.0/fail)\r\n");
 
   printf("\r\n--- Main test (settle = %u ms, %lu reads) ---\r\n", (unsigned)POWER_SETTLE_MS, (unsigned long)NUM_READS);
   printf("Starting in 2s...\r\n");
@@ -106,6 +148,10 @@ static time_t RunModbusRxTimeoutTest(void)
   }
   FLEX_DelayMs(SERIAL_SETTLE_MS);
 
+  uint32_t sum_ticks = 0u;
+  uint32_t count_fast = 0u;
+  uint32_t max_ticks = 0u;
+
   for (uint32_t i = 0; i < NUM_READS; i++)
   {
     float temperature = MODBUS_TEMPERATURE_INVALID;
@@ -114,6 +160,14 @@ static time_t RunModbusRxTimeoutTest(void)
     uint32_t t1 = FLEX_TickGet();
     uint32_t duration_ticks = t1 - t0;
     uint32_t duration_ms   = duration_ticks;
+
+    if (result == 0 && duration_ticks < 2000u)
+    {
+      sum_ticks += duration_ticks;
+      count_fast++;
+      if (duration_ticks > max_ticks)
+        max_ticks = duration_ticks;
+    }
 
     printf("Read %lu: %s, %.1f °C, %lu ticks (%lu ms) %s\r\n",
            (unsigned long)(i + 1),
@@ -125,6 +179,13 @@ static time_t RunModbusRxTimeoutTest(void)
   }
 
   printf("\r\n");
+  printf("--- Determined ---\r\n");
+  if (minimal_settle_ms != 0u)
+    printf("  Minimal settle (skip first then read): %u ms\r\n", minimal_settle_ms);
+  printf("  Read timeout (disconnected): 2000 ticks (~2 s) per serial_read\r\n");
+  if (count_fast > 0u)
+    printf("  Read duration (connected, short timeout): avg %lu ms, max %lu ms\r\n",
+           (unsigned long)(sum_ticks / count_fast), (unsigned long)max_ticks);
   printf("Pass: connected -> OK and < 2000 ticks; disconnected -> FAIL and ~2000 ticks.\r\n");
   printf("Reset to run again.\r\n");
   printf("\r\n");

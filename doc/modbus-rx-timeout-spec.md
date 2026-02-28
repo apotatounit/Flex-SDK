@@ -58,3 +58,20 @@ Use a minimal build that runs **only** Modbus read timing, with clear prompts so
 
 - If the stack issues several `serial_read()` calls per transaction, a “no response” case can exceed 2 s total (e.g. 2 s × number of read calls). The spec only requires that we do **not** add an extra 2 s delay after a successful response.
 - For exact tick-to-ms conversion use the SDK rule: 1000 ticks = 1 s.
+
+---
+
+## First response after power-up: skip 00 00, then read again
+
+### Observed behaviour
+
+- After power-up and `Modbus_Init()`, the **first** Modbus read often returns **00 00** (0.0 °C) even when the sensor is connected and will later return a valid temperature. Longer settle delays (tested up to 2000 ms) do not reliably eliminate this.
+- **Recommended**: Treat the first 00 00 response as "sensor not ready" and **read again** (retry). The second (or later) read then typically returns the real value. This is implemented in `Modbus_Request_Receive_Temperature()` in `modbussensor.c` (skip first 00 00, retry; accept 00 00 on retries as valid 0.0 °C).
+
+### Minimal settle time and timeout
+
+- **Settle time**: Delay from sensor power-on (and `Modbus_Init()`) until the first read. Use at least ~200 ms (`MODBUS_MIN_SETTLE_MS`); 400–800 ms is a safe default. Calibration over 400–2000 ms showed the first *single* read still often returns 00 00; the useful behaviour is "skip first 00 00 and read again", not "wait long enough that the first read is always valid".
+- **Short timeouts**: To keep **duration &lt; 2000 ticks** when the sensor is connected, use:
+  - **Inter-byte timeout** in `serial_read()`: after receiving a full frame (e.g. ≥ 9 bytes for Read Input Registers response), if no further byte arrives within a short window (e.g. 50–100 ms), return immediately instead of waiting for the full 2 s. This gives fast reads (~200–300 ms) once the sensor is responding.
+  - **Minimum bytes before inter-byte**: Require at least 9 bytes (full response) before applying the short inter-byte timeout, so we do not return on 8-byte TX echo.
+- **Finding minimal values**: The RX timeout test firmware runs a **settle calibration** (several power-on-to-first-read delays) and **timed reads** with short timeouts. Use it to confirm: (1) connected reads complete in &lt; 2000 ticks; (2) disconnected reads hit the long timeout (~2000 ticks). Tune inter-byte timeout and settle within that behaviour.
