@@ -1,17 +1,22 @@
 # Flex-SDK project
 
-## Autonomous build / upload / serial
+## Autonomous build / upload / serial / iterate
 
 For building (Codespace), flashing the device, and reading serial output, run commands in the **host** terminal so the environment has:
 - `gh` auth and SSH agent (for build-via-codespace.sh)
 - Python venv with pyserial (for updater / flash-and-listen.sh)
 - USB serial device access (e.g. /dev/cu.usbmodem1101)
 
-The user must enable **Cursor → Settings → Agents → Legacy Terminal Tool** (or equivalent "run in host") so agent terminal commands use the host shell. See `doc/cursor-host-integration.md`.
+The user must approve **Run** (without sandbox) when the agent runs terminal commands, or enable run-in-host in Cursor settings. See `doc/cursor-host-integration.md`.
 
-Key commands from repo root:
+**Full autonomous cycle (build → flash → capture serial):**
+- Run: `./autonomous-build-flash-capture.sh [--push] [PORT] [SECONDS]` (e.g. `./autonomous-build-flash-capture.sh --push /dev/cu.usbmodem1101 90`).
+- Serial output is written to `./serial_capture.txt` (or SERIAL_CAPTURE_FILE).
+- To iterate: read `serial_capture.txt`, decide if result is good enough (e.g. "stable=yes", "RESULT: Minimum reliable", or no errors). If not, edit code, then re-run the script (with --push to commit and build latest). Abort when criteria are met or max iterations reached.
+
+Key single-step commands from repo root:
 - Build (and optionally push): `./build-via-codespace.sh` or `./build-via-codespace.sh --push`
 - Flash and listen: `./flash-and-listen.sh` or `./flash-and-listen.sh /dev/cu.usbmodem1101`
 - Serial port only: `./scripts/updater.py -l -p /dev/cu.usbmodem1101 -w`
 
-After running, read the terminal output (e.g. "read terminal" or the terminal file in .cursor/projects/.../terminals/) to inspect build or serial output.
+After running, read the terminal output or `serial_capture.txt` to inspect build or serial output.

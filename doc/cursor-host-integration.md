@@ -2,15 +2,25 @@
 
 To let the Cursor agent **build**, **upload**, and **monitor** the FlexSense device from your Mac (using your `gh` auth, SSH keys, Python venv, and USB) without you running each command manually:
 
-## 1. Enable Legacy Terminal (run in host)
+## 1. Let the agent run in your environment (host / non-sandbox)
 
-1. Open **Cursor Settings**: `Cmd + ,` (or **Cursor → Settings**).
-2. Go to the **Agents** section (sidebar or search "Agents").
-3. Under **Terminal** / **Inline Editing & Terminal**, enable **"Legacy Terminal Tool"** (or equivalent option that runs agent commands in the **host** terminal instead of the sandbox).
+Cursor’s UI changes between versions. Try these in order:
 
-When enabled, the agent’s terminal commands run in your real environment, so:
+**Option A – Settings (if you see it)**  
+Open **Cursor Settings** (`Cmd + ,`), then search the settings search box for:
+- **"Agent"** or **"Agents"** → look for **Terminal** or **Legacy Terminal Tool**
+- **"Chat"** → **Auto Run** → look for options to run commands **outside the sandbox** or use a **Legacy** terminal
+- **"Sandbox"** → turn off “Auto-run in sandbox” or set “Ask every time” so you can choose **Run** (no sandbox) when the agent runs a command
 
-- `gh codespace` uses your GitHub login and SSH keys (no repeated passphrase).
+**Option B – Approve “Run” when the agent runs a command**  
+You don’t have to find a setting. When the agent runs a command and it fails (e.g. network or device blocked by the sandbox), Cursor usually offers:
+- **Run** (or “Run without sandbox”) – runs in your real terminal with your `gh`, venv, and USB. Click this so build/upload/serial work.
+- **Add to allowlist** – optional, so future runs of that command can be auto-approved.
+
+So: ask the agent to build or flash; when it suggests a terminal command, approve it and choose **Run** (not sandbox) so it uses your host environment.
+
+When commands run in your real environment:
+- `gh codespace` uses your GitHub login and SSH keys.
 - `./build-via-codespace.sh` can list codespaces, SSH, and download binaries.
 - `./flash-and-listen.sh` or `./scripts/updater.py` can use your venv and `/dev/cu.usbmodem*`.
 
@@ -49,3 +59,19 @@ Cursor’s Legacy Terminal can sometimes freeze or misbehave. If that happens:
 
 - Serial port: set `UPDATER_PORT=/dev/cu.usbmodem1101` or pass it as the first argument to `flash-and-listen.sh`.
 - Repo root: agent commands assume the current workspace is the Flex-SDK repo root (where `build-via-codespace.sh` and `flash-and-listen.sh` live).
+
+## 6. Autonomous build → flash → capture → iterate
+
+To have the agent iterate (build, flash, read output, change code, repeat until “enough”):
+
+**Option A – You run the cycle, agent iterates on the capture**  
+1. In your terminal (with `ssh-add` and venv active):  
+   `./autonomous-build-flash-capture.sh [--push] [PORT] [SECONDS]`  
+   Example: `./autonomous-build-flash-capture.sh --push /dev/cu.usbmodem1101 90`  
+2. Serial output is written to `./serial_capture.txt`.  
+3. Ask the agent to “read serial_capture.txt and iterate” (or “evaluate and suggest changes”).  
+4. Agent suggests code changes; you apply them (or switch to Agent mode to apply).  
+5. Run the script again; repeat until the output meets your criteria.
+
+**Option B – Agent runs the cycle (when host terminal is used)**  
+If Cursor runs the agent’s commands in your host terminal (e.g. you approved “Run” or enabled Legacy Terminal), the agent can run `./autonomous-build-flash-capture.sh` itself, then read `serial_capture.txt`, decide if done (e.g. “stable=yes” or “RESULT: Minimum reliable”), and either stop or edit code and run again. Non-interactive push uses `COMMIT_MSG` (set by the script) so no commit prompt.

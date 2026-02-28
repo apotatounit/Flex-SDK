@@ -49,7 +49,11 @@ if [[ -n "${PUSH:-}" ]]; then
   if git diff --staged --quiet; then
     echo "No changes to commit."
   else
-    read -r -p "Commit message [build via Codespace]: " msg
+    if [[ -n "${COMMIT_MSG:-}" ]]; then
+      msg="$COMMIT_MSG"
+    else
+      read -r -p "Commit message [build via Codespace]: " msg
+    fi
     git commit -m "${msg:-build via Codespace}"
   fi
   echo "==> Pushing..."
