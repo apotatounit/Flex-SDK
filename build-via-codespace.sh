@@ -83,8 +83,27 @@ if [[ -z "${CODESPACE_NAME:-}" ]]; then
   fi
 fi
 
-echo "==> Running build in Codespace ($CODESPACE_NAME)..."
-gh codespace ssh -c "$CODESPACE_NAME" -- "cd $REMOTE_WORKSPACE && git pull && ./clean_build_skipgnss.sh"
+# Build on the same branch as local so Codespace doesn't stay on main
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+if [[ -z "$CURRENT_BRANCH" ]]; then
+  echo "Warning: Could not detect current branch (detached HEAD?). Codespace will not switch branch."
+  CURRENT_BRANCH=""
+fi
+# #region agent log
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_PATH="$SCRIPT_DIR/.cursor/debug.log"
+if [[ -n "$CURRENT_BRANCH" ]]; then
+  mkdir -p "$SCRIPT_DIR/.cursor"
+  printf '%s\n' "{\"message\":\"build-via-codespace branch\",\"data\":{\"branch\":\"$CURRENT_BRANCH\"},\"hypothesisId\":\"H1\",\"timestamp\":$(date +%s)000,\"location\":\"build-via-codespace.sh:remote\"}" >> "$LOG_PATH" 2>/dev/null || true
+fi
+# #endregion agent log
+REMOTE_CMD="cd $REMOTE_WORKSPACE && git fetch origin"
+if [[ -n "$CURRENT_BRANCH" ]]; then
+  REMOTE_CMD="$REMOTE_CMD && git checkout $CURRENT_BRANCH"
+fi
+REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_skipgnss.sh"
+echo "==> Running build in Codespace ($CODESPACE_NAME) on branch: ${CURRENT_BRANCH:-<current>}..."
+gh codespace ssh -c "$CODESPACE_NAME" -- "$REMOTE_CMD"
 
 echo "==> Downloading binaries to $LOCAL_BUILD_DIR..."
 mkdir -p "$LOCAL_BUILD_DIR"
