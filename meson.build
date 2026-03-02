@@ -15,6 +15,9 @@ project(
  ]
 )
 
+option('diagnostics', type: 'boolean', value: false,
+       description: 'Build diagnostics firmware (1s sampling, plottable output) instead of main app')
+
 if not meson.is_cross_build()
   error('Native builds not supported. Please ensure you have provided a cross file via \'--cross-file\'.')
 endif
@@ -47,11 +50,19 @@ if meson.is_subproject()
     ] + flex_sdk_lib_deps,
   )
 else
-  # Add your projects source file to this array
-  c_files = [
-    'src/main.c',
-    'src/modbussensor.c'
-  ]
+  # Build diagnostics firmware (1s sampling, plottable output) with -Ddiagnostics=true
+  diagnostics = get_option('diagnostics')
+  if diagnostics
+    c_files = [
+      'src/diagnostics.c',
+      'src/modbussensor.c'
+    ]
+  else
+    c_files = [
+      'src/main.c',
+      'src/modbussensor.c'
+    ]
+  endif
 
   # Create the user_application as an ELF
   user_application_elf = executable('user_application',
