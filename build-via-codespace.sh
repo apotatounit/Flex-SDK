@@ -53,7 +53,7 @@ if [[ -n "${PUSH:-}" ]]; then
     git commit -m "${msg:-build via Codespace}"
   fi
   echo "==> Pushing..."
-  git push
+  git push -u origin HEAD
 fi
 
 # Resolve Codespace name
