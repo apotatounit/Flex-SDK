@@ -13,10 +13,7 @@ project(
     'b_lto=true',
     'b_lto_mode=default',
  ]
-)
-
-option('diagnostics', type: 'boolean', value: false,
-       description: 'Build diagnostics firmware (1s sampling, plottable output) instead of main app')
+ )
 
 if not meson.is_cross_build()
   error('Native builds not supported. Please ensure you have provided a cross file via \'--cross-file\'.')

@@ -10,3 +10,7 @@ option('cold_start', type : 'boolean', value : false,
         description: 'Build the merge applications binary with cold start network information',
         yield: true
 )
+option('diagnostics', type: 'boolean', value: false,
+       description: 'Build diagnostics firmware (1s sampling, plottable output) instead of main app',
+       yield: true
+)
