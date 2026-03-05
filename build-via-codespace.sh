@@ -101,8 +101,14 @@ REMOTE_CMD="cd $REMOTE_WORKSPACE && git fetch origin"
 if [[ -n "$CURRENT_BRANCH" ]]; then
   REMOTE_CMD="$REMOTE_CMD && git checkout $CURRENT_BRANCH"
 fi
-REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_skipgnss.sh"
-echo "==> Running build in Codespace ($CODESPACE_NAME) on branch: ${CURRENT_BRANCH:-<current>}..."
+if [[ "$CURRENT_BRANCH" == "diagnostics" ]]; then
+  REMOTE_CMD="$REMOTE_CMD && git pull && rm -rf build && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
+else
+  REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_skipgnss.sh"
+fi
+BUILD_DESC=""
+[[ "$CURRENT_BRANCH" == "diagnostics" ]] && BUILD_DESC=" (diagnostics firmware)"
+echo "==> Running build in Codespace ($CODESPACE_NAME) on branch: ${CURRENT_BRANCH:-<current>}${BUILD_DESC}..."
 gh codespace ssh -c "$CODESPACE_NAME" -- "$REMOTE_CMD"
 
 echo "==> Downloading binaries to $LOCAL_BUILD_DIR..."
