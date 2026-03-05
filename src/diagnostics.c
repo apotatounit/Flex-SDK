@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <inttypes.h>
 #include <math.h>
 #include "flex.h"
 #include "modbussensor.h"
@@ -116,13 +115,7 @@ static int init_sensors(void)
     if (Modbus_Init() != 0)
       printf("Failed to init Modbus.\n");
     else
-    {
       bModbusInitDone = true;
-      uint8_t slave = 0;
-      float t = MODBUS_TEMPERATURE_INVALID;
-      if (Modbus_ScanForTemperatureSensor(&slave, &t) == 0)
-        printf("Modbus temperature sensor at slave 0x%02X\n", (unsigned)slave);
-    }
   }
   if (FLEX_PulseCounterInit(PULSE_WAKEUP_COUNT, FLEX_PCNT_DEFAULT_OPTIONS) != 0)
   {
@@ -148,7 +141,7 @@ static void print_plottable(uint32_t tick, float pressure_v, float pressure_bar,
     printf("nan");
   else
     printf("%.1f", (double)temp_c);
-  printf(" pulses=%" PRIu64 " ppm=%.0f", pulses, (double)ppm);
+  printf(" pulses=%lu ppm=%.0f", (unsigned long)pulses, (double)ppm);
   printf(" pressure_ma=");
   if (isnan(pressure_ma))
     printf("nan");

@@ -49,8 +49,9 @@ if [[ -n "${PUSH:-}" ]]; then
   if git diff --staged --quiet; then
     echo "No changes to commit."
   else
-    read -r -p "Commit message [build via Codespace]: " msg
-    git commit -m "${msg:-build via Codespace}"
+    BRANCH=$(git branch --show-current 2>/dev/null || true)
+    DEFAULT_MSG="${COMMIT_MSG:-build: ${BRANCH:-via Codespace}}"
+    git commit -m "$DEFAULT_MSG"
   fi
   echo "==> Pushing..."
   git push -u origin HEAD
