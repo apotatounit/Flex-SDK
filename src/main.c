@@ -20,9 +20,8 @@
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
 #define SENSOR_STABILISE_DELAY_MS 0   /* rely on POWER_SETTLE_MS + SERIAL_SETTLE_MS for Modbus */
-#define DATA_COLLECTION_DURATION_SEC 20   /* sample sensors for 20 s (1 s interval, like diagnostics.c) */
-#define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT 20          /* 20 samples at 1 s = 20 s collection */
+#define DATA_COLLECTION_INTERVAL_MS 1000   /* target ms between start of each sample */
+#define SENSOR_READINGS_COUNT 10          /* 10 measurements */
 
 #define INTERVAL_WAKEUP_TRANSMIT (60 * 60) /* 1 hour: wake every hour, read 20 s, schedule message, sleep */
 
@@ -30,6 +29,7 @@
 #define ENABLE_MODBUS 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
 #define LED_BLINK_DELAY 200      // ms
+#define LED_BLINK_RAPID_MS 50    // ms on/off for rapid startup blink
 
 typedef struct
 {
@@ -68,12 +68,15 @@ typedef struct
 static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
 static void BlinkLed(int count);
+static void BlinkLedRapid(int count);
 static uint16_t GetPulseRate(void);
 
-static ReadResult ReadTemperatureSensor(void)
+/* Returns temperature and, when elapsed_ms != NULL, writes read duration in ms. */
+static ReadResult ReadTemperatureSensor(uint32_t *elapsed_ms)
 {
   float temperature = MODBUS_TEMPERATURE_INVALID;
   int result = 0;
+  uint32_t t0 = FLEX_TickGet();
   if (ENABLE_MODBUS)
   {
     result = Modbus_Request_Receive_Temperature(&temperature);
@@ -85,6 +88,8 @@ static ReadResult ReadTemperatureSensor(void)
     temperature = 25.0f;
     result = 0;
   }
+  if (elapsed_ms != NULL)
+    *elapsed_ms = FLEX_TickGet() - t0;  /* ticks; 1000 ticks = 1 s on this platform */
   ReadResult read_result = {result, temperature};
   return read_result;
 }
@@ -168,11 +173,19 @@ static SensorMeasurements CollectSensorData(void)
   int16_t err_ain = 0;
   for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
   {
+    uint32_t sample_start = FLEX_TickGet();
     printf("Collecting sensor data...\r\n");
     uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
     uint16_t pulse_rate = GetPulseRate();
-    ReadResult temperature_result = ReadTemperatureSensor();
+    uint32_t temp_elapsed_ticks = 0;
+    ReadResult temperature_result = ReadTemperatureSensor(&temp_elapsed_ticks);
     ReadResult pressure_result = ReadPressureSensor();
+    uint32_t sample_elapsed_ticks = FLEX_TickGet() - sample_start;
+    /* 1000 ticks = 1 s */
+    uint32_t sample_elapsed_ms = sample_elapsed_ticks;
+    int delay_ms = (int)(DATA_COLLECTION_INTERVAL_MS) - (int)sample_elapsed_ms;
+    if (delay_ms < 0)
+      delay_ms = 0;
 
     if (i == 0)
     {
@@ -205,14 +218,7 @@ static SensorMeasurements CollectSensorData(void)
       err_ain = 0;
     }
 
-    if (pressure_result.return_code || temperature_result.return_code)
-    {
-      BlinkLed(3);
-    }
-    else
-    {
-      BlinkLed(1);
-    }
+    BlinkLed(1);   /* one blink per sensor read */
 
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
@@ -222,10 +228,8 @@ static SensorMeasurements CollectSensorData(void)
     else
       printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
 
-    if (DATA_COLLECTION_INTERVAL_MS > 2 * LED_BLINK_DELAY)
-    {
-      FLEX_DelayMs(DATA_COLLECTION_INTERVAL_MS - 2 * LED_BLINK_DELAY);
-    }
+    if (delay_ms > 0)
+      FLEX_DelayMs((uint32_t)delay_ms);
   }
 
   float avg_temperature = sum_counter_temp ? temperature_sum / sum_counter_temp : 0;
@@ -331,33 +335,34 @@ static void DeinitSensors(void)
   FLEX_PulseCounterDeinit();
 }
 
-// function to blink LED n times, defined by argument
 static void BlinkLed(int count)
 {
-  bool inverse = false;
   for (int i = 0; i < count; i++)
   {
-    if (inverse)
-      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-    else
-      FLEX_LEDGreenStateSet(FLEX_LED_ON);
+    FLEX_LEDGreenStateSet(FLEX_LED_ON);
     FLEX_DelayMs(LED_BLINK_DELAY);
-    if (inverse)
-      FLEX_LEDGreenStateSet(FLEX_LED_ON);
-    else
-      FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+    FLEX_LEDGreenStateSet(FLEX_LED_OFF);
     FLEX_DelayMs(LED_BLINK_DELAY);
-    FLEX_DelayMs(LED_BLINK_DELAY);
+  }
+}
+
+static void BlinkLedRapid(int count)
+{
+  for (int i = 0; i < count; i++)
+  {
+    FLEX_LEDGreenStateSet(FLEX_LED_ON);
+    FLEX_DelayMs(LED_BLINK_RAPID_MS);
+    FLEX_LEDGreenStateSet(FLEX_LED_OFF);
+    FLEX_DelayMs(LED_BLINK_RAPID_MS);
   }
 }
 
 static time_t ScheduleNextRun(void)
 {
-  /* Wake every hour: read sensors for 20 s, schedule message, then sleep 1 hour */
   time_t wakeup_time = FLEX_TimeGet();
   time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
 
-  BlinkLed(5);
+  BlinkLedRapid(2);   /* 2 rapid blinks on startup */
 
   if (InitSensors() != 0)
   {
@@ -365,7 +370,7 @@ static time_t ScheduleNextRun(void)
   }
   else
   {
-    printf("Sensors initialised, collecting for %d s...\r\n", DATA_COLLECTION_DURATION_SEC);
+    printf("Sensors initialised, collecting %u samples...\r\n", (unsigned)SENSOR_READINGS_COUNT);
     SensorMeasurements measurements = CollectSensorData();
     printf("Sensor data collected\r\n");
     if (ENABLE_TRANSMIT)
@@ -374,7 +379,10 @@ static time_t ScheduleNextRun(void)
       Message message = MakeMessage(measurements);
       int ret = send_message(message);
       printf("Message sent with result: %d\r\n", ret);
-      BlinkLed(5);
+      if (message.error_code != 0)
+        BlinkLed(5);   /* 5 before sleep if error */
+      else
+        BlinkLed(3);   /* 3 before sleep if ok */
     }
   }
   printf("Deinitialising sensors...\r\n");
