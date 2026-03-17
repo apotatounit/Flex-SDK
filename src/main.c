@@ -20,8 +20,9 @@
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
 #define SENSOR_STABILISE_DELAY_MS 0   /* rely on POWER_SETTLE_MS + SERIAL_SETTLE_MS for Modbus */
-#define DATA_COLLECTION_INTERVAL_MS 1000   /* target ms between start of each sample */
-#define SENSOR_READINGS_COUNT 10          /* 10 measurements */
+#define TARGET_COLLECTION_DURATION_MS 20000u  /* entire read cycle must fit in 20 s */
+#define SENSOR_READINGS_COUNT 7u
+#define DATA_COLLECTION_INTERVAL_MS (TARGET_COLLECTION_DURATION_MS / SENSOR_READINGS_COUNT)  /* ~2857 ms between start of each sample */
 
 #define INTERVAL_WAKEUP_TRANSMIT (60 * 60) /* 1 hour: wake every hour, read 20 s, schedule message, sleep */
 
@@ -157,10 +158,11 @@ static FlowMeterData StopFlowMeterPulseCounting(void)
 
 static uint16_t GetPulseRate(void)
 {
-  // Replace with actual logic to get current pulse rate
   uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
-  uint16_t pulse_rate = (uint16_t)(1000.0 / (FLEX_TickGet() - pulse_count_start_tick) * pulse_count); // pulses per second
-  return pulse_rate;
+  uint32_t elapsed_ticks = FLEX_TickGet() - pulse_count_start_tick;
+  if (elapsed_ticks == 0u)
+    return 0u;
+  return (uint16_t)((1000.0 * (double)pulse_count) / (double)elapsed_ticks);  /* pulses per second; 1000 ticks = 1 s */
 }
 
 static SensorMeasurements CollectSensorData(void)
@@ -171,23 +173,16 @@ static SensorMeasurements CollectSensorData(void)
   unsigned int sum_counter_temp = 0;
   int16_t err_temp = 0;
   int16_t err_ain = 0;
-  for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
+  for (unsigned int i = 0u; i < SENSOR_READINGS_COUNT; i++)
   {
     uint32_t sample_start = FLEX_TickGet();
     printf("Collecting sensor data...\r\n");
     uint32_t pulse_count = (uint32_t)FLEX_PulseCounterGet();
     uint16_t pulse_rate = GetPulseRate();
-    uint32_t temp_elapsed_ticks = 0;
-    ReadResult temperature_result = ReadTemperatureSensor(&temp_elapsed_ticks);
+    ReadResult temperature_result = ReadTemperatureSensor(NULL);
     ReadResult pressure_result = ReadPressureSensor();
-    uint32_t sample_elapsed_ticks = FLEX_TickGet() - sample_start;
-    /* 1000 ticks = 1 s */
-    uint32_t sample_elapsed_ms = sample_elapsed_ticks;
-    int delay_ms = (int)(DATA_COLLECTION_INTERVAL_MS) - (int)sample_elapsed_ms;
-    if (delay_ms < 0)
-      delay_ms = 0;
 
-    if (i == 0)
+    if (i == 0u)
     {
       if (temperature_result.return_code)
         printf("[debug] First Modbus read: FAIL (result=%d)\r\n", temperature_result.return_code);
@@ -224,10 +219,14 @@ static SensorMeasurements CollectSensorData(void)
     float pressure = pressure_result.value;
 
     if (isnan(temperature))
-      printf(">temperature: N/A °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", pressure, pulse_count, pulse_rate);
+      printf(">temperature: N/A °C, >analog_in: %.3f V, >pulses: %lu, >pulse_rate: %u\r\n", (double)pressure, (unsigned long)pulse_count, pulse_rate);
     else
-      printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %ld, >pulse_rate: %u\r\n", temperature, pressure, pulse_count, pulse_rate);
+      printf(">temperature: %.1f °C, >analog_in: %.3f V, >pulses: %lu, >pulse_rate: %u\r\n", (double)temperature, (double)pressure, (unsigned long)pulse_count, pulse_rate);
 
+    /* Elapsed includes read + blink + printf; delay so full cycle fits in DATA_COLLECTION_INTERVAL_MS */
+    uint32_t sample_elapsed_ticks = FLEX_TickGet() - sample_start;
+    uint32_t sample_elapsed_ms = sample_elapsed_ticks;  /* 1000 ticks = 1 s */
+    int delay_ms = (int)DATA_COLLECTION_INTERVAL_MS - (int)sample_elapsed_ms;
     if (delay_ms > 0)
       FLEX_DelayMs((uint32_t)delay_ms);
   }
@@ -432,7 +431,7 @@ static int send_message(Message message)
 void FLEX_AppInit()
 {
   printf("%s\r\n", APPLICATION_NAME);
-  printf("Nilus App release_v03\r\n");
+  printf("Nilus App release_v04\r\n");
   printf("Compiled on %s at %s\r\n", __DATE__, __TIME__);
   InitDevice();
   FLEX_JobSchedule(ScheduleNextRun, FLEX_ASAP());
