@@ -174,6 +174,13 @@ static SensorMeasurements CollectSensorData(void)
     ReadResult temperature_result = ReadTemperatureSensor();
     ReadResult pressure_result = ReadPressureSensor();
 
+    if (i == 0)
+    {
+      if (temperature_result.return_code)
+        printf("[debug] First Modbus read: FAIL (result=%d)\r\n", temperature_result.return_code);
+      else
+        printf("[debug] First Modbus read: OK %.1f °C (settle timeouts sufficient)\r\n", (double)temperature_result.value);
+    }
     if (temperature_result.return_code)
     {
       printf("Error reading temperature sensor\r\n");
@@ -272,15 +279,17 @@ static int InitDevice(void)
 
 static int InitSensors(void)
 {
-  printf("Initialising sensors...\r\n");
+  printf("Initialising sensors (power->%u ms->Modbus_Init->%u ms->read)...\r\n",
+         (unsigned)POWER_SETTLE_MS, (unsigned)SERIAL_SETTLE_MS);
   /* 1. Power on */
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
     printf("Failed to enable sensor power supply.\r\n");
     return -1;
   }
-  printf("Sensor power supply enabled.\r\n");
+  printf("[init] Power on OK, waiting POWER_SETTLE_MS=%u ms...\r\n", (unsigned)POWER_SETTLE_MS);
   FLEX_DelayMs(POWER_SETTLE_MS);
+  printf("[init] Power settle done.\r\n");
 
   if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
   {
@@ -298,8 +307,9 @@ static int InitSensors(void)
       return -1;
     }
     bInitModbusRequired = false;
-    printf("Modbus initialised.\r\n");
+    printf("[init] Modbus_Init OK, waiting SERIAL_SETTLE_MS=%u ms...\r\n", (unsigned)SERIAL_SETTLE_MS);
     FLEX_DelayMs(SERIAL_SETTLE_MS);
+    printf("[init] Serial settle done. Ready for first read.\r\n");
   }
 
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
