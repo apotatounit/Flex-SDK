@@ -25,7 +25,6 @@
 #define SENSOR_READINGS_COUNT 20          /* 20 samples at 1 s = 20 s collection */
 
 #define INTERVAL_WAKEUP_TRANSMIT (60 * 60) /* 1 hour: wake every hour, read 20 s, schedule message, sleep */
-// #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
 
 #define ENABLE_TRANSMIT 1
 #define ENABLE_MODBUS 1
@@ -47,8 +46,6 @@ typedef struct
 {
   uint8_t sequence_number;
   uint32_t time;
-  // int32_t latitude;
-  // int32_t longitude;
   int16_t temperature;
   uint16_t analog_in;
   uint16_t pulse_per_minute;
@@ -73,12 +70,6 @@ static int send_message(Message message);
 static void BlinkLed(int count);
 static uint16_t GetPulseRate(void);
 
-// Arrays to store sensor readings
-// static float temperature_readings[SENSOR_READINGS_COUNT];
-// static float pressure_readings[SENSOR_READINGS_COUNT];
-// static uint32_t flow_meter_pulse_count = 0;
-
-// Simulated functions for temperature, pressure, and flow meter
 static ReadResult ReadTemperatureSensor(void)
 {
   float temperature = MODBUS_TEMPERATURE_INVALID;
@@ -113,7 +104,6 @@ static ReadResult ReadPressureSensor(void)
   {
     read_result.value = SensorReading / 1000.0; // Convert from mV to V
     read_result.return_code = 0;
-    // printf("Analog Input Voltage: %.3f V\r\n", read_result.value);
   }
 
   return read_result;
@@ -176,8 +166,6 @@ static SensorMeasurements CollectSensorData(void)
   unsigned int sum_counter_temp = 0;
   int16_t err_temp = 0;
   int16_t err_ain = 0;
-  // int16_t err_pulse = 0;
-  // Collect temperature and pressure readings
   for (int i = 0; i < SENSOR_READINGS_COUNT; i++)
   {
     printf("Collecting sensor data...\r\n");
@@ -274,18 +262,11 @@ static SensorMeasurements CollectSensorData(void)
   measurements.pulse_per_minute = (uint16_t)pulses_per_minute;
   measurements.ret_temp = (uint8_t)err_temp;
   measurements.ret_ain = (uint8_t)err_ain;
-
-  // TODO assign ret_temp - error code for sensor interfacing
   return measurements;
 }
 
 static int InitDevice(void)
 {
-  // if (ENABLE_MODBUS && Modbus_Init() != 0)
-  // {
-  //   printf("Failed to Init Modbus.\r\n");
-  //   return -1;
-  // }
   return 0;
 }
 
@@ -347,26 +328,15 @@ static void BlinkLed(int count)
   for (int i = 0; i < count; i++)
   {
     if (inverse)
-    {
       FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      // printf("Green LED Off\n");
-    }
     else
-    {
       FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      // printf("Green LED On\n");
-    }
     FLEX_DelayMs(LED_BLINK_DELAY);
     if (inverse)
-    {
       FLEX_LEDGreenStateSet(FLEX_LED_ON);
-      // printf("Green LED On\n");
-    }
     else
-    {
       FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-      // printf("Green LED Off\n");
-    }
+    FLEX_DelayMs(LED_BLINK_DELAY);
     FLEX_DelayMs(LED_BLINK_DELAY);
   }
 }
@@ -423,29 +393,11 @@ static Message MakeMessage(SensorMeasurements measurements)
   {
     message.error_code |= SENSOR_ERROR_AIN;
   }
-
-  //   int32_t latitude = 0;
-  //   int32_t longitude = 0;
-  //   FLEX_LastLocationAndLastFixTime(&latitude, &longitude, NULL);
-  //   message.latitude = latitude;
-  //   message.longitude = longitude;
-
   return message;
 }
 
 static int send_message(Message message)
 {
-  //   FLEX_LastLocationAndLastFixTime(&latitude, &longitude, NULL);
-  //   message.latitude = latitude;
-  //   message.longitude = longitude;
-
-  //   int16_t temperature = 0;
-  //   int16_t humidity = 0;
-  //   read_temperature_and_humidity(&temperature, &humidity);
-  //   message.temperature = temperature;
-  //   message.humidity = humidity;
-
-  // Schedule messages for satellite transmission
   int ret = FLEX_MessageSchedule((const uint8_t *const)&message, sizeof(message));
   printf("Message scheduling returned: %d\n", ret);
   printf("Scheduled message: \n");
