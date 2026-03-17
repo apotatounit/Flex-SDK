@@ -11,7 +11,8 @@
 #   ./build-via-codespace.sh              # build in Codespace, download to ./build/
 #   ./build-via-codespace.sh --push        # git add, commit, push, then build
 #   ./build-via-codespace.sh --upload      # after download, upload to device (set UPDATER_PORT if needed)
-#   UPDATER_PORT=/dev/cu.usbmodem1101 ./build-via-codespace.sh --upload
+#   ./build-via-codespace.sh --upload --listen   # flash then open serial and read output
+#   UPDATER_PORT=/dev/cu.usbmodem1101 ./build-via-codespace.sh --upload --listen
 #
 set -euo pipefail
 
@@ -19,17 +20,20 @@ REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-/workspaces/Flex-SDK}"
 LOCAL_BUILD_DIR="${LOCAL_BUILD_DIR:-./build}"
 PUSH=
 UPLOAD=
+LISTEN=
 GPS=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --push)   PUSH=1; shift ;;
-    --upload) UPLOAD=1; shift ;;
-    --gps)    GPS=1; shift ;;
+    --push)    PUSH=1; shift ;;
+    --upload)  UPLOAD=1; shift ;;
+    --listen)  LISTEN=1; shift ;;
+    --gps)     GPS=1; shift ;;
     -h|--help)
-      echo "Usage: $0 [--push] [--upload] [--gps]"
+      echo "Usage: $0 [--push] [--upload] [--listen] [--gps]"
       echo "  --push   Commit all changes, push, then build in Codespace and download binaries."
       echo "  --upload After download, run updater to flash device (requires UPDATER_PORT if not default)."
+      echo "  --listen After upload, start app and open serial to read output (use with --upload)."
       echo "  --gps    Build with GPS/GNSS enabled (default: skip GNSS)."
       echo "  Env:     CODESPACE_NAME, REMOTE_WORKSPACE, LOCAL_BUILD_DIR, UPDATER_PORT, GPS"
       exit 0
@@ -142,11 +146,17 @@ if [[ -n "${UPLOAD:-}" ]]; then
     exit 0
   fi
   UPDATER_PORT="${UPDATER_PORT:-}"
-  if [[ -z "$UPDATER_PORT" ]]; then
-    echo "==> Uploading to device (auto-detect port)..."
-    ./scripts/updater.py -m "$LOCAL_BUILD_DIR/user_application.bin"
+  UPDATER_ARGS=(-m "$LOCAL_BUILD_DIR/user_application.bin")
+  if [[ -n "${LISTEN:-}" ]]; then
+    UPDATER_ARGS+=(-s -l)
+    [[ -n "$UPDATER_PORT" ]] && UPDATER_ARGS+=(-p "$UPDATER_PORT" -w)
   else
-    echo "==> Uploading to device on $UPDATER_PORT..."
-    ./scripts/updater.py -m "$LOCAL_BUILD_DIR/user_application.bin" -p "$UPDATER_PORT"
+    [[ -n "$UPDATER_PORT" ]] && UPDATER_ARGS+=(-p "$UPDATER_PORT")
   fi
+  if [[ -z "$UPDATER_PORT" ]]; then
+    echo "==> Uploading to device (auto-detect port)${LISTEN:+ then listening}..."
+  else
+    echo "==> Uploading to device on $UPDATER_PORT${LISTEN:+ then listening}..."
+  fi
+  ./scripts/updater.py "${UPDATER_ARGS[@]}"
 fi
