@@ -233,7 +233,9 @@ static void end_application_data_unit_pack(struct application_data_uint *const a
 
 static uint8_t protocol_data_unit_unpack_u8(struct protocol_data_unit_parser *const parser) {
   MODBUS_ASSERT(parser != NULL);
-  MODBUS_ASSERT(parser->ptr < parser->end);
+  if (parser->ptr >= parser->end) {
+    return 0;
+  }
   const uint8_t value = parser->ptr[0];
   ++parser->ptr;
   return value;
@@ -244,7 +246,9 @@ static int protocol_data_unit_parser(const struct application_data_uint *const a
   const enum modbus_function_code function_code, struct protocol_data_unit_parser *const parser) {
   MODBUS_ASSERT(adu != NULL);
   MODBUS_ASSERT(parser != NULL);
-  MODBUS_ASSERT(adu->size >= MODBUS_ADU_MIN_SIZE);
+  if (adu->size < MODBUS_ADU_MIN_SIZE) {
+    return -MODBUS_ERROR_MALFORMED_RESPONSE;
+  }
 
   // Application Data Unit (ADU)/(Protocol Data Unit (PDU) Packing Diagram
   // | 0     | Slave Address |
@@ -279,6 +283,9 @@ static int protocol_data_unit_parser(const struct application_data_uint *const a
   // | 2 | Exception code                              |
   if (parser->function_code != function_code) {
     if (parser->function_code == get_error_function_code(function_code)) {
+      if (parser->ptr >= parser->end) {
+        return -MODBUS_ERROR_MALFORMED_RESPONSE;
+      }
       const uint8_t exception_code = protocol_data_unit_unpack_u8(parser);
       return -exception_code;
     }
@@ -308,7 +315,10 @@ static int modbus_transmit(struct modbus_instance *const instance) {
   if (rx_nbytes <= 0) {
     return -MODBUS_ERROR_IO_FAILURE;
   }
-  instance->adu_rx.size = rx_nbytes;
+  if ((size_t)rx_nbytes < MODBUS_ADU_MIN_SIZE) {
+    return -MODBUS_ERROR_IO_FAILURE;
+  }
+  instance->adu_rx.size = (size_t)rx_nbytes;
 
   return MODBUS_SUCCESS;
 }
@@ -348,7 +358,13 @@ static int modbus_read(const MYRIOTA_ModbusHandle handle,
     return parser_result;
   }
 
+  if (parser.ptr >= parser.end) {
+    return -MODBUS_ERROR_MALFORMED_RESPONSE;
+  }
   const uint8_t nbytes = protocol_data_unit_unpack_u8(&parser);
+  if (parser.ptr + nbytes > parser.end) {
+    return -MODBUS_ERROR_MALFORMED_RESPONSE;
+  }
   const bool read_register_overflow = is_read_register(function_code) && (nbytes > count * 2);
   const bool read_coil_overflow =
     !is_read_register(function_code) && (nbytes > (count + 8 - 1) / 8);
