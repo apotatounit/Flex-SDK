@@ -1,3 +1,7 @@
+/*
+ * Init order for reliable Modbus reads (minimal time):
+ *   Power on -> POWER_SETTLE_MS -> Modbus_Init -> SERIAL_SETTLE_MS -> read(s).
+ */
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
@@ -8,12 +12,14 @@
 #define APPLICATION_NAME "Sensor Pipeline Logger"
 
 // Sensor configuration
-#define SENSOR_POWER_SUPPLY FLEX_POWER_OUT_5V
-#define ANALOG_IN_MODE FLEX_ANALOG_IN_VOLTAGE
-#define PULSE_WAKEUP_COUNT 0
+#define SENSOR_POWER_SUPPLY       FLEX_POWER_OUT_5V
+#define POWER_SETTLE_MS           800u   /* ms after power-on before Modbus_Init (sensor stabilise) */
+#define SERIAL_SETTLE_MS          150u   /* ms after Modbus_Init before first read */
+#define ANALOG_IN_MODE            FLEX_ANALOG_IN_VOLTAGE
+#define PULSE_WAKEUP_COUNT        0
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
-#define SENSOR_STABILISE_DELAY_MS 5000
+#define SENSOR_STABILISE_DELAY_MS 0   /* rely on POWER_SETTLE_MS + SERIAL_SETTLE_MS for Modbus */
 #define DATA_COLLECTION_DURATION_SEC 20   /* sample sensors for 20 s (1 s interval, like diagnostics.c) */
 #define DATA_COLLECTION_INTERVAL_MS 1000
 #define SENSOR_READINGS_COUNT 20          /* 20 samples at 1 s = 20 s collection */
@@ -23,8 +29,6 @@
 
 #define ENABLE_TRANSMIT 1
 #define ENABLE_MODBUS 1
-/** Set to 1 to scan Modbus slaves 0x01..0x0F after init and print which address has a temperature sensor. */
-#define MODBUS_SCAN_AFTER_INIT 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
 #define LED_BLINK_DELAY 200      // ms
 
@@ -288,53 +292,39 @@ static int InitDevice(void)
 static int InitSensors(void)
 {
   printf("Initialising sensors...\r\n");
-  // Enable power supply to sensors
+  /* 1. Power on */
   if (FLEX_PowerOutInit(SENSOR_POWER_SUPPLY) != 0)
   {
     printf("Failed to enable sensor power supply.\r\n");
     return -1;
   }
-  else
-  {
-    printf("Sensor power supply enabled.\r\n");
-  }
-  // Initialise the analog input
+  printf("Sensor power supply enabled.\r\n");
+  FLEX_DelayMs(POWER_SETTLE_MS);
 
   if (FLEX_AnalogInputInit(ANALOG_IN_MODE) != 0)
   {
     printf("Failed to Init Analog Input.\r\n");
     return -1;
   }
-  else
-  {
-    printf("Analog Input initialised.\r\n");
-  }
+  printf("Analog Input initialised.\r\n");
 
+  /* 2. Modbus init after power settle; then serial settle before first read */
   if (ENABLE_MODBUS && bInitModbusRequired)
   {
     if (Modbus_Init() != 0)
-      printf("Failed to Init Modbus.\r\n");
-    else
     {
-      bInitModbusRequired = false;
-      printf("Modbus initialised.\r\n");
-#if MODBUS_SCAN_AFTER_INIT
-      {
-        uint8_t slave = 0;
-        float scan_temp = MODBUS_TEMPERATURE_INVALID;
-        if (Modbus_ScanForTemperatureSensor(&slave, &scan_temp) == 0)
-          printf("Modbus temperature sensor at slave 0x%02X\r\n", (unsigned)slave);
-      }
-#endif
+      printf("Failed to Init Modbus.\r\n");
+      return -1;
     }
+    bInitModbusRequired = false;
+    printf("Modbus initialised.\r\n");
+    FLEX_DelayMs(SERIAL_SETTLE_MS);
   }
 
   FLEX_DelayMs(SENSOR_FLOW_METER_STABILISE_DELAY_MS);
-
   StartFlowMeterTimer();
-
-  // Wait for sensors to stabilize
-  FLEX_DelayMs(SENSOR_STABILISE_DELAY_MS);
+  if (SENSOR_STABILISE_DELAY_MS > 0u)
+    FLEX_DelayMs(SENSOR_STABILISE_DELAY_MS);
   return 0;
 }
 
