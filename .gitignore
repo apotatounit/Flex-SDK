@@ -3,4 +3,4 @@
 *.sha256
 network_info
 .vscode
-debug.log
+.cursor/debug.log

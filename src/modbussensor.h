@@ -10,7 +10,7 @@
 #include "flex.h"
 #include "myriota/modbus.h"
 
-#define SENSOR_READ_MAX_RETRIES 3
+#define SENSOR_READ_MAX_RETRIES 1   /* one attempt per sample (no retries) */
 
 // Serial context structure
 typedef struct
