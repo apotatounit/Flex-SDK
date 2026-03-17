@@ -109,14 +109,16 @@ REMOTE_CMD="cd $REMOTE_WORKSPACE && git fetch origin"
 if [[ -n "$CURRENT_BRANCH" ]]; then
   REMOTE_CMD="$REMOTE_CMD && git checkout $CURRENT_BRANCH"
 fi
+# Discard any local changes in the Codespace so pull never fails with "would be overwritten by merge"
+REMOTE_CMD="$REMOTE_CMD && git reset --hard && git pull"
 # Default (no --gps): skip-GNSS build. Transmission is still enabled; skip_gnss only
 # disables GNSS time/location sync, not message scheduling/send (user_application.bin).
 if [[ "$CURRENT_BRANCH" == "diagnostics" ]]; then
-  REMOTE_CMD="$REMOTE_CMD && git pull && rm -rf build && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
+  REMOTE_CMD="$REMOTE_CMD && rm -rf build && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
 elif [[ -n "${GPS:-}" ]]; then
-  REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_enablegnss.sh"
+  REMOTE_CMD="$REMOTE_CMD && ./clean_build_enablegnss.sh"
 else
-  REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_skipgnss.sh"
+  REMOTE_CMD="$REMOTE_CMD && ./clean_build_skipgnss.sh"
 fi
 BUILD_DESC=""
 [[ "$CURRENT_BRANCH" == "diagnostics" ]] && BUILD_DESC=" (diagnostics firmware)"
