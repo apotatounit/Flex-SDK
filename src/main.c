@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <math.h>
 #include "flex.h"
 #include <time.h>
 #include "modbussensor.h"
@@ -13,12 +14,11 @@
 
 #define SENSOR_FLOW_METER_STABILISE_DELAY_MS 100
 #define SENSOR_STABILISE_DELAY_MS 5000
-// #define DATA_COLLECTION_DURATION_SEC 10
+#define DATA_COLLECTION_DURATION_SEC 20   /* sample sensors for 20 s (1 s interval, like diagnostics.c) */
 #define DATA_COLLECTION_INTERVAL_MS 1000
-#define SENSOR_READINGS_COUNT 5
+#define SENSOR_READINGS_COUNT 20          /* 20 samples at 1 s = 20 s collection */
 
-#define INTERVAL_WAKEUP_DEFAULT 30       // 30 seconds
-#define INTERVAL_WAKEUP_TRANSMIT 60 * 60 // 1 hour
+#define INTERVAL_WAKEUP_TRANSMIT (60 * 60) /* 1 hour: wake every hour, read 20 s, schedule message, sleep */
 // #define INTERVAL_WAKEUP_TEST 10 // 10 seconds
 
 #define ENABLE_TRANSMIT 1
@@ -383,22 +383,19 @@ static void BlinkLed(int count)
 
 static time_t ScheduleNextRun(void)
 {
-  // Schedule next run in 1 hour since wakeup time
+  /* Wake every hour: read sensors for 20 s, schedule message, then sleep 1 hour */
   time_t wakeup_time = FLEX_TimeGet();
-  time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_DEFAULT;
+  time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
 
-  // FLEX_LEDGreenStateSet(FLEX_LED_ON);
-  // printf("Green LED On\n");
   BlinkLed(5);
 
-  // Init sensors
-  if (InitSensors())
+  if (InitSensors() != 0)
   {
     printf("Failed Init Sensors\n");
   }
   else
   {
-    printf("Sensors initialised\r\n");
+    printf("Sensors initialised, collecting for %d s...\r\n", DATA_COLLECTION_DURATION_SEC);
     SensorMeasurements measurements = CollectSensorData();
     printf("Sensor data collected\r\n");
     if (ENABLE_TRANSMIT)
@@ -407,15 +404,13 @@ static time_t ScheduleNextRun(void)
       Message message = MakeMessage(measurements);
       int ret = send_message(message);
       printf("Message sent with result: %d\r\n", ret);
-      next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
       BlinkLed(5);
     }
   }
   printf("Deinitialising sensors...\r\n");
   DeinitSensors();
 
-  // FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-  printf("Next run in %ld seconds\r\n", (int32_t)(next_run_time - FLEX_TimeGet()));
+  printf("Next run in %ld seconds (1 hour)\r\n", (long)(next_run_time - FLEX_TimeGet()));
   return next_run_time;
 }
 

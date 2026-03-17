@@ -19,16 +19,19 @@ REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-/workspaces/Flex-SDK}"
 LOCAL_BUILD_DIR="${LOCAL_BUILD_DIR:-./build}"
 PUSH=
 UPLOAD=
+GPS=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --push)   PUSH=1; shift ;;
     --upload) UPLOAD=1; shift ;;
+    --gps)    GPS=1; shift ;;
     -h|--help)
-      echo "Usage: $0 [--push] [--upload]"
+      echo "Usage: $0 [--push] [--upload] [--gps]"
       echo "  --push   Commit all changes, push, then build in Codespace and download binaries."
       echo "  --upload After download, run updater to flash device (requires UPDATER_PORT if not default)."
-      echo "  Env:     CODESPACE_NAME, REMOTE_WORKSPACE, LOCAL_BUILD_DIR, UPDATER_PORT"
+      echo "  --gps    Build with GPS/GNSS enabled (default: skip GNSS)."
+      echo "  Env:     CODESPACE_NAME, REMOTE_WORKSPACE, LOCAL_BUILD_DIR, UPDATER_PORT, GPS"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -104,11 +107,14 @@ if [[ -n "$CURRENT_BRANCH" ]]; then
 fi
 if [[ "$CURRENT_BRANCH" == "diagnostics" ]]; then
   REMOTE_CMD="$REMOTE_CMD && git pull && rm -rf build && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
+elif [[ -n "${GPS:-}" ]]; then
+  REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_enablegnss.sh"
 else
   REMOTE_CMD="$REMOTE_CMD && git pull && ./clean_build_skipgnss.sh"
 fi
 BUILD_DESC=""
 [[ "$CURRENT_BRANCH" == "diagnostics" ]] && BUILD_DESC=" (diagnostics firmware)"
+[[ -n "${GPS:-}" ]] && BUILD_DESC=" (GPS enabled)"
 echo "==> Running build in Codespace ($CODESPACE_NAME) on branch: ${CURRENT_BRANCH:-<current>}${BUILD_DESC}..."
 gh codespace ssh -c "$CODESPACE_NAME" -- "$REMOTE_CMD"
 
