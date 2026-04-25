@@ -111,14 +111,17 @@ if [[ -n "$CURRENT_BRANCH" ]]; then
 fi
 # Discard any local changes in the Codespace so pull never fails with "would be overwritten by merge"
 REMOTE_CMD="$REMOTE_CMD && git reset --hard && git pull"
+# Fetch Myriota blobs on the remote after pull (not in git). Inlined here so this works
+# even when origin does not yet have download_binaries in clean_build_*.sh.
+REMOTE_DL="python3 scripts/download_binaries.py"
 # Default (no --gps): skip-GNSS build. Transmission is still enabled; skip_gnss only
 # disables GNSS time/location sync, not message scheduling/send (user_application.bin).
 if [[ "$CURRENT_BRANCH" == "diagnostics" ]]; then
-  REMOTE_CMD="$REMOTE_CMD && rm -rf build && python3 scripts/download_binaries.py && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
+  REMOTE_CMD="$REMOTE_CMD && rm -rf build && $REMOTE_DL && meson -Dskip_gnss=true -Ddiagnostics=true --cross-file ./flex-crossfile.ini build && meson compile -C build"
 elif [[ -n "${GPS:-}" ]]; then
-  REMOTE_CMD="$REMOTE_CMD && ./clean_build_enablegnss.sh"
+  REMOTE_CMD="$REMOTE_CMD && $REMOTE_DL && ./clean_build_enablegnss.sh"
 else
-  REMOTE_CMD="$REMOTE_CMD && ./clean_build_skipgnss.sh"
+  REMOTE_CMD="$REMOTE_CMD && $REMOTE_DL && ./clean_build_skipgnss.sh"
 fi
 BUILD_DESC=""
 [[ "$CURRENT_BRANCH" == "diagnostics" ]] && BUILD_DESC=" (diagnostics firmware)"
