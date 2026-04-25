@@ -72,8 +72,6 @@ static int modbus_read_temperature_at_slave(const MYRIOTA_ModbusHandle handle,
   int result = MYRIOTA_ModbusReadInputRegisters(handle, slave, addr, 2, response_bytes);
   if (result != MODBUS_SUCCESS)
     return result;
-  if (response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
-    return -MODBUS_ERROR_IO_FAILURE; /* treat all-zero as no sensor */
   int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
   *temperature = (float)temp_raw / 10.0f;
   return MODBUS_SUCCESS;
@@ -135,13 +133,6 @@ int Modbus_Request_Receive_Temperature(float *const temperature)
       continue;
     }
     printf("Response Bytes: %02X %02X\n", response_bytes[0], response_bytes[1]);
-
-    if (retries == 0 && response_bytes[0] == 0x00 && response_bytes[1] == 0x00)
-    {
-      printf("Skipping first zero result\n");
-      result = MODBUS_ERROR_IO_FAILURE;
-      continue;
-    }
 
     int16_t temp_raw = merge_i16(response_bytes[0], response_bytes[1]);
     if (temperature)
