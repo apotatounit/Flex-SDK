@@ -8,10 +8,17 @@ description: >-
   building on a dev machine and copying binaries before updater.py. Use when
   the user mentions Flex-SDK, build-via-codespace, Codespace build, RPi upload,
   Raspberry Pi flash, UPDATER_PORT, wake, reboot, or serial listen for this
-  repo.
+  repo. For ESP32 over Pi, use esp32-pio-rpi-upload in esp32_newcommence.
 ---
 
 # Flex-SDK: Codespace build → Raspberry Pi → device upload
+
+**ESP32 on the Pi** (PlatformIO, different repo): **`esp32-pio-rpi-upload`** — `esp32_newcommence/.cursor/skills/esp32-pio-rpi-upload/SKILL.md`.
+
+## Pi serial basics (this stack)
+
+- User in **`dialout`**; prefer **`/dev/serial/by-id/...`**; do **not** use macOS `/dev/cu.*` on the Pi.
+- If upload/listen fails, check **`fuser`** / **`lsof`** on the TTY for a stuck monitor.
 
 ## Script of record
 
@@ -36,9 +43,7 @@ Repo root wrappers around **`scripts/updater.py`**. Prefer **`/dev/serial/by-id/
 
 Sync repo to the Pi (`rsync` or `git pull`), then `chmod +x` if needed and run from **`~/Flex-SDK`**.
 
-## Two supported flows
-
-### Flow A — Everything on the Raspberry Pi
+## Flow A — Everything on the Raspberry Pi
 
 Use when the USB device is attached to the Pi and the agent should not assume a Mac serial port.
 
@@ -70,7 +75,7 @@ export UPDATER_PORT="/dev/serial/by-id/..."
 
 **Optional push before build:** `./build-via-codespace.sh --push --upload` (commits all changes with a default message — only use when the user explicitly wants that).
 
-### Flow B — Build on dev machine, upload only on the Pi
+## Flow B — Build on dev machine, upload only on the Pi
 
 Use when **`gh`** / Codespace access is only on the Mac (or CI), but hardware is on the Pi.
 

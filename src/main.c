@@ -29,8 +29,12 @@
 #define ENABLE_TRANSMIT 1
 #define ENABLE_MODBUS 1
 bool bInitModbusRequired = true; // only required on first init after power supply init
-#define LED_BLINK_DELAY 200      // ms
-#define LED_BLINK_RAPID_MS 50    // ms on/off for rapid startup blink
+#define LED_BLINK_RAPID_MS 50    /* ms on/off for rapid startup blink */
+/* Solid green = sampling OK; brief fast OFF pulses = sensor fault (1 temp, 2 analog, 3 both). */
+#define LED_GLITCH_OFF_MS 45u
+#define LED_GLITCH_ON_MS 40u
+#define LED_RUN_OK_HOLD_MS 400u
+#define LED_RUN_FAIL_GLITCHES 4u
 
 typedef struct
 {
@@ -68,8 +72,9 @@ typedef struct
 
 static Message MakeMessage(SensorMeasurements measurements);
 static int send_message(Message message);
-static void BlinkLed(int count);
 static void BlinkLedRapid(int count);
+static void LedGlitchOffPulses(unsigned count);
+static void IndicatePerSampleReads(bool temp_ok, bool ain_ok);
 static uint16_t GetPulseRate(void);
 
 /* Returns temperature and, when elapsed_ms != NULL, writes read duration in ms. */
@@ -167,6 +172,8 @@ static uint16_t GetPulseRate(void)
 
 static SensorMeasurements CollectSensorData(void)
 {
+  FLEX_LEDGreenStateSet(FLEX_LED_ON); /* baseline: on while collecting */
+
   // Calculate averages
   float temperature_sum = 0.0, pressure_sum = 0.0;
   unsigned int sum_counter_pres = 0;
@@ -213,7 +220,7 @@ static SensorMeasurements CollectSensorData(void)
       err_ain = 0;
     }
 
-    BlinkLed(1);   /* one blink per sensor read */
+    IndicatePerSampleReads(temperature_result.return_code == 0, pressure_result.return_code == 0);
 
     float temperature = temperature_result.value;
     float pressure = pressure_result.value;
@@ -334,15 +341,30 @@ static void DeinitSensors(void)
   FLEX_PulseCounterDeinit();
 }
 
-static void BlinkLed(int count)
+static void LedGlitchOffPulses(unsigned count)
 {
-  for (int i = 0; i < count; i++)
+  for (unsigned i = 0u; i < count; i++)
   {
-    FLEX_LEDGreenStateSet(FLEX_LED_ON);
-    FLEX_DelayMs(LED_BLINK_DELAY);
     FLEX_LEDGreenStateSet(FLEX_LED_OFF);
-    FLEX_DelayMs(LED_BLINK_DELAY);
+    FLEX_DelayMs(LED_GLITCH_OFF_MS);
+    FLEX_LEDGreenStateSet(FLEX_LED_ON);
+    if (i + 1u < count)
+      FLEX_DelayMs(LED_GLITCH_ON_MS);
   }
+}
+
+/* Solid ON; only dips briefly on failure — 1 glitch = Modbus/temp, 2 = analog, 3 = both. */
+static void IndicatePerSampleReads(bool temp_ok, bool ain_ok)
+{
+  FLEX_LEDGreenStateSet(FLEX_LED_ON);
+  unsigned pulses = 0u;
+  if (!temp_ok && !ain_ok)
+    pulses = 3u;
+  else if (!temp_ok)
+    pulses = 1u;
+  else if (!ain_ok)
+    pulses = 2u;
+  LedGlitchOffPulses(pulses);
 }
 
 static void BlinkLedRapid(int count)
@@ -362,10 +384,12 @@ static time_t ScheduleNextRun(void)
   time_t next_run_time = wakeup_time + INTERVAL_WAKEUP_TRANSMIT;
 
   BlinkLedRapid(2);   /* 2 rapid blinks on startup */
+  FLEX_LEDGreenStateSet(FLEX_LED_ON); /* solid baseline before init / collect */
 
   if (InitSensors() != 0)
   {
     printf("Failed Init Sensors\n");
+    LedGlitchOffPulses(5u); /* init failure: five fast dips */
   }
   else
   {
@@ -378,10 +402,11 @@ static time_t ScheduleNextRun(void)
       Message message = MakeMessage(measurements);
       int ret = send_message(message);
       printf("Message sent with result: %d\r\n", ret);
+      FLEX_LEDGreenStateSet(FLEX_LED_ON);
       if (message.error_code != 0)
-        BlinkLed(5);   /* 5 before sleep if error */
+        LedGlitchOffPulses(LED_RUN_FAIL_GLITCHES); /* fast dips = run had sensor faults */
       else
-        BlinkLed(3);   /* 3 before sleep if ok */
+        FLEX_DelayMs(LED_RUN_OK_HOLD_MS); /* stay solid = all channels reported OK */
     }
   }
   printf("Deinitialising sensors...\r\n");
